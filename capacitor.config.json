@@ -1,0 +1,6 @@
+{
+  "appId": "com.aditya.schoolchat",
+  "appName": "School Chat",
+  "webDir": "dist",
+  "server": { "androidScheme": "https" }
+}

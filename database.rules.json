@@ -1,0 +1,62 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "config": {
+      ".read": "auth != null",
+      "inviteCode": {
+        ".write": "auth != null && root.child('config').child('adminUid').val() === auth.uid"
+      },
+      "adminCode": {
+        ".write": "auth != null && root.child('config').child('adminUid').val() === auth.uid"
+      },
+      "adminUid": {
+        ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
+      }
+    },
+    "users": {
+      ".read": "auth != null",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        ".validate": "newData.hasChildren(['name','email','role']) && (auth.uid !== $uid || newData.child('role').val() === (auth.uid === root.child('config').child('adminUid').val() ? 'admin' : 'user'))",
+        "unread": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+          "$chatId": {
+            ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())",
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          }
+        }
+      }
+    },
+    "chats": {
+      "$chatId": {
+        ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+        ".write": "auth != null && (newData.child('participants').child(auth.uid).exists() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+        "participants": {
+          "$uid": { ".validate": "newData.val() === true && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())" }
+        },
+        "typing": {
+          "$uid": {
+            ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+            ".write": "auth != null && $uid === auth.uid",
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "messages": {
+          "$messageId": {
+            ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+            ".write": "auth != null && (newData.child('senderId').val() === auth.uid || newData.child('receiverId').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())",
+            ".validate": "newData.hasChildren(['senderId','receiverId','text','createdAt','delivered','seen']) && root.child('chats').child($chatId).child('participants').child(newData.child('senderId').val()).exists() && root.child('chats').child($chatId).child('participants').child(newData.child('receiverId').val()).exists() && newData.child('text').isString() && newData.child('delivered').isBoolean() && newData.child('seen').isBoolean()"
+          }
+        }
+      }
+    },
+    "adminMirror": {
+      "$chatId": {
+        ".read": "auth != null && auth.uid === root.child('config').child('adminUid').val()",
+        ".write": "auth != null && (auth.uid === root.child('config').child('adminUid').val() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())"
+      }
+    }
+  }
+}
