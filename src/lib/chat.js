@@ -71,3 +71,26 @@ export async function markSeen(chatId, messageId) {
 export async function clearUnread(uid, chatId) {
   await set(ref(db, `users/${uid}/unread/${chatId}`), 0);
 }
+
+// "Delete for me" — hides the message only on this device/account; the
+// message itself is untouched for the other side and for admin monitoring.
+export async function deleteMessageForMe(uid, chatId, messageId) {
+  await set(ref(db, `users/${uid}/hidden/${chatId}/${messageId}`), true);
+}
+
+export function listenHidden(uid, chatId, callback) {
+  return onValue(ref(db, `users/${uid}/hidden/${chatId}`), s => callback(s.val() || {}));
+}
+
+// "Delete for everyone" — only allowed by the sender, only within 5 minutes
+// (also enforced server-side by database.rules.json using `now`). Removes
+// the message from the chat AND from adminMirror, so the admin can no
+// longer see it either — matches what was asked for.
+export const DELETE_WINDOW_MS = 5 * 60 * 1000;
+
+export async function deleteMessageForEveryone(chatId, messageId) {
+  await update(ref(db), {
+    [`chats/${chatId}/messages/${messageId}`]: null,
+    [`adminMirror/${chatId}/messages/${messageId}`]: null
+  });
+}

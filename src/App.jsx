@@ -1,26 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { onValue, ref, set } from 'firebase/database';
+import { onValue, ref } from 'firebase/database';
 import {
-  ArrowLeft, Bell, MessageCircle, Phone, Search, Send,
-  ShieldCheck, Timer, Users, Wifi, X, LayoutGrid, MessagesSquare
+  ArrowLeft, Bell, MessageCircle, Search, Send,
+  ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
-import { beginRegistration, completeRegistration, login, logout } from './lib/auth';
+import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile } from './lib/auth';
 import {
-  chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage
+  chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage,
+  deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS
 } from './lib/chat';
 import { getPhoneContacts } from './lib/contacts';
+import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
-
-function generateCode(prefix) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return `${prefix}-${s}`;
-}
+import { isPinSet, LockScreen, PinPad, clearPin } from './components/AppLock';
+import { usePrefs } from './context/Prefs';
 
 function formatLastSeen(ts) {
   if (!ts) return 'अंतिम बार उपलब्ध नहीं';
@@ -59,6 +56,10 @@ function ProfileSteps({ identity, onDone }) {
     setError(''); setBusy(true);
     try {
       await completeRegistration({ uid: identity.uid, email: identity.email, name, phone, avatar, photoUrl });
+      // Ask for the contacts permission right away and match quietly in the
+      // background — nothing about this is shown; it just means friends who
+      // are already in the app show up naturally once matched.
+      getPhoneContacts().catch(() => {});
       onDone?.();
     } catch (e) {
       setError(e.message || 'प्रोफ़ाइल सेव नहीं हुई।');
@@ -105,8 +106,6 @@ function RegisterWizard() {
   const [identity, setIdentity] = useState(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [invite, setInvite] = useState('');
-  const [adminCode, setAdminCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -114,10 +113,9 @@ function RegisterWizard() {
 
   async function submit(e) {
     e.preventDefault();
-    if (!invite.trim() && !adminCode.trim()) { setError('जोड़ने वाला कोड या एडमिन कोड — कम से कम एक भरें।'); return; }
     setError(''); setBusy(true);
     try {
-      const result = await beginRegistration(email, password, invite, adminCode);
+      const result = await beginRegistration(email, password);
       setIdentity(result);
     } catch (e) {
       setError(e.message || 'प्रक्रिया पूरी नहीं हुई।');
@@ -135,8 +133,6 @@ function RegisterWizard() {
         यह ऐप एडमिन-मॉनिटर्ड है: इस ऐप में होने वाली सभी चैट — आपकी एडमिन से बातचीत और आपस में दो दोस्तों की चैट भी — एडमिन को दिखती हैं। खाता बनाकर आप इससे सहमत हैं।
       </p>
       <form onSubmit={submit}>
-        <label>जोड़ने वाला यूनिक कोड <span className="optional">(सामान्य यूज़र के लिए ज़रूरी — एडमिन कोड दे रहे हों तो खाली छोड़ सकते हैं)</span><input value={invite} onChange={e => setInvite(e.target.value)} /></label>
-        <label>एडमिन कोड <span className="optional">(केवल पहली बार एडमिन बनाने के लिए — दिया तो इनवाइट कोड की ज़रूरत नहीं)</span><input value={adminCode} onChange={e => setAdminCode(e.target.value)} /></label>
         <label>ईमेल<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
         <label>पासवर्ड<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength="6" required /></label>
         {error && <div className="error">{error}</div>}
@@ -180,10 +176,11 @@ function LoginForm({ onSwitch }) {
   );
 }
 
-function AuthScreen() {
+function AuthScreen({ bannedMsg }) {
   const [mode, setMode] = useState('login');
   return (
     <main className="auth">
+      {bannedMsg && <div className="error banned-banner">{bannedMsg}</div>}
       {mode === 'register'
         ? <RegisterWizard />
         : <LoginForm onSwitch={() => setMode('register')} />}
@@ -203,10 +200,18 @@ function CompleteProfileScreen({ me }) {
   );
 }
 
-function MessageBubble({ me, message, onSeen }) {
+function MessageBubble({ me, message, onSeen, onLongPress }) {
   const mine = message.senderId === me.uid;
+  const pressTimer = useRef(null);
+  function start() { pressTimer.current = setTimeout(() => onLongPress(message), 550); }
+  function stop() { clearTimeout(pressTimer.current); }
   return (
-    <div className={`bubble ${mine ? 'mine' : 'theirs'}`} onClick={() => !mine && onSeen(message.id)}>
+    <div
+      className={`bubble ${mine ? 'mine' : 'theirs'}`}
+      onClick={() => !mine && onSeen(message.id)}
+      onPointerDown={start} onPointerUp={stop} onPointerLeave={stop}
+      onContextMenu={e => { e.preventDefault(); onLongPress(message); }}
+    >
       <div>{message.text}</div>
       <div className="message-meta">
         <span>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString('hi-IN', { hour: '2-digit', minute: '2-digit' }) : '…'}</span>
@@ -216,17 +221,34 @@ function MessageBubble({ me, message, onSeen }) {
   );
 }
 
+function MessageActionSheet({ message, me, chatId, onClose }) {
+  const mine = message.senderId === me.uid;
+  const withinWindow = mine && message.createdAt && (Date.now() - message.createdAt < DELETE_WINDOW_MS);
+  return (
+    <div className="msg-actions" onClick={onClose}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <button onClick={async () => { await deleteMessageForMe(me.uid, chatId, message.id); onClose(); }}>{`मेरे लिए हटाएं`}</button>
+        {withinWindow && <button className="danger" onClick={async () => { await deleteMessageForEveryone(chatId, message.id); onClose(); }}>{`सबके लिए हटाएं`}</button>}
+        <button className="cancel" onClick={onClose}>रद्द करें</button>
+      </div>
+    </div>
+  );
+}
+
 function Chat({ me, user, onBack }) {
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
+  const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
   const [typingUsers, setTypingUsers] = useState({});
   const [sending, setSending] = useState(false);
+  const [actionMsg, setActionMsg] = useState(null);
   const listRef = useRef(null);
   const typingTimer = useRef(null);
   const typingActive = useRef(false);
 
   useEffect(() => listenMessages(chatId, setMessages), [chatId]);
+  useEffect(() => listenHidden(me.uid, chatId, setHidden), [chatId, me.uid]);
   useEffect(() => listenTyping(chatId, setTypingUsers), [chatId]);
   useEffect(() => {
     let active = true;
@@ -296,13 +318,14 @@ function Chat({ me, user, onBack }) {
         <div className="online-dot" title={user.online ? 'ऑनलाइन' : 'ऑफलाइन'} />
       </header>
       <div className="messages" ref={listRef}>
-        {messages.map(m => <MessageBubble key={m.id} me={me} message={m} onSeen={id => markSeen(chatId, id).catch(() => {})} />)}
+        {messages.filter(m => !hidden[m.id]).map(m => <MessageBubble key={m.id} me={me} message={m} onSeen={id => markSeen(chatId, id).catch(() => {})} onLongPress={setActionMsg} />)}
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
       <form className="composer" onSubmit={submit}>
         <input value={text} onChange={e => handleTyping(e.target.value)} placeholder="संदेश लिखें…" />
         <button className="send" disabled={sending}><Send size={20} /></button>
       </form>
+      {actionMsg && <MessageActionSheet message={actionMsg} me={me} chatId={chatId} onClose={() => setActionMsg(null)} />}
     </div>
   );
 }
@@ -312,7 +335,6 @@ function AppShell({ me, profile }) {
   const [query, setQuery] = useState('');
   const [chatUser, setChatUser] = useState(null);
   const [settings, setSettings] = useState(false);
-  const [contacts, setContacts] = useState([]);
   const [unread, setUnread] = useState({});
   const [previews, setPreviews] = useState({});
   const [notificationsReady, setNotificationsReady] = useState(false);
@@ -413,8 +435,8 @@ function AppShell({ me, profile }) {
         {!filtered.length && <div className="empty"><Users size={38} /><p>कोई उपयोगकर्ता नहीं मिला।</p></div>}
       </main>
       {settings && <SettingsDrawer
-        me={me} profile={profile} adminUser={adminUser} users={users} unread={unread}
-        contacts={contacts} setContacts={setContacts} onClose={() => setSettings(false)} onOpenChat={setChatUser}
+        me={me} profile={profile} adminUser={adminUser}
+        onClose={() => setSettings(false)} onOpenChat={setChatUser}
         onOpenAdmin={() => { setSettings(false); setView('admin'); }}
       />}
       {isAdmin && <AdminTabBar view={view} setView={setView} />}
@@ -431,41 +453,107 @@ function AdminTabBar({ view, setView }) {
   );
 }
 
-function SettingsDrawer({ me, profile, adminUser, users, unread, contacts, setContacts, onClose, onOpenChat, onOpenAdmin }) {
-  const [notificationState, setNotificationState] = useState('जाँच हो रही है…');
-  useEffect(() => { prepareNotifications().then(ok => setNotificationState(ok ? 'चालू' : 'उपलब्ध नहीं')); }, []);
+function ProfileEditPanel({ me, profile, onClose }) {
+  const [name, setName] = useState(profile.name);
+  const [phone, setPhone] = useState(profile.phone || '');
+  const [avatar, setAvatar] = useState(profile.avatar || AVATARS[0]);
+  const [photoUrl, setPhotoUrl] = useState(profile.photoUrl || '');
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await updateOwnProfile(me.uid, { name, phone, avatar, photoUrl });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="settings-panel">
+      <PhotoPicker photoUrl={photoUrl} onChange={setPhotoUrl} />
+      <p className="muted small">या एक अवतार चुनें</p>
+      <AvatarPicker selected={avatar} onSelect={a => { setAvatar(a); setPhotoUrl(''); }} />
+      <label>नाम<input value={name} onChange={e => setName(e.target.value)} /></label>
+      <label>मोबाइल नंबर<input value={phone} onChange={e => setPhone(e.target.value)} /></label>
+      <label>ईमेल <span className="optional">(लॉगिन आईडी, बदला नहीं जा सकता)</span><input value={profile.email} readOnly /></label>
+      <div className="step-actions">
+        <button className="secondary" onClick={onClose}>वापस</button>
+        <button className="primary" onClick={save} disabled={saving}>{saving ? 'सेव हो रहा है…' : 'सेव करें'}</button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin }) {
+  const { t, lang, setLang, theme, setTheme } = usePrefs();
+  const [panel, setPanel] = useState('main');
+
+  if (panel === 'editProfile') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-head"><b>प्रोफ़ाइल एडिट करें</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <ProfileEditPanel me={me} profile={profile} onClose={() => setPanel('main')} />
+  </aside></div>;
+
+  if (panel === 'language') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-head"><b>{t('language')}</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <div className="lang-options">
+      <button className={lang === 'hi' ? 'active' : ''} onClick={() => { setLang('hi'); setPanel('main'); }}>{t('langHindi')}</button>
+      <button className={lang === 'en' ? 'active' : ''} onClick={() => { setLang('en'); setPanel('main'); }}>{t('langEnglish')}</button>
+    </div>
+  </aside></div>;
+
+  if (panel === 'theme') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-head"><b>{t('theme')}</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <div className="theme-options">
+      <button className={theme === 'light' ? 'active' : ''} onClick={() => { setTheme('light'); setPanel('main'); }}>{t('themeLight')}</button>
+      <button className={theme === 'dark' ? 'active' : ''} onClick={() => { setTheme('dark'); setPanel('main'); }}>{t('themeDark')}</button>
+      <button className={theme === 'system' ? 'active' : ''} onClick={() => { setTheme('system'); setPanel('main'); }}>{t('themeSystem')}</button>
+    </div>
+  </aside></div>;
+
+  if (panel === 'applock') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-head"><b>{t('appLock')}</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} />
+    {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>ऐप लॉक हटाएं</button>}
+  </aside></div>;
+
+  if (panel === 'logout') return <div className="overlay" onClick={onClose}><div className="logout-confirm" onClick={e => e.stopPropagation()}>
+    <b>{t('logoutConfirmTitle')}</b>
+    <div className="step-actions" style={{ width: '100%', maxWidth: 260 }}>
+      <button className="secondary" onClick={() => setPanel('main')}>{t('cancel')}</button>
+      <button className="primary" onClick={logout}>{t('logout')}</button>
+    </div>
+  </div></div>;
 
   return (
     <div className="overlay" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
-        <div className="drawer-head"><b>सेटिंग</b><button className="icon" onClick={onClose}><X /></button></div>
-        <div className="setting-user"><Avatar user={profile} size="lg" /><b>{profile.name}</b><small>{profile.email}</small></div>
+        <div className="drawer-head"><b>{t('settings')}</b><button className="icon" onClick={onClose}><X /></button></div>
+        <button className="setting-user as-row" onClick={() => setPanel('editProfile')}>
+          <Avatar user={profile} size="lg" /><b>{profile.name}</b>
+          <span className="edit-pencil">✎</span>
+        </button>
         <p className="disclosure small">यह ऐप एडमिन-मॉनिटर्ड है — सभी चैट एडमिन को दिख सकती हैं।</p>
-        {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> Private Chat to Admin <span className="row-end">›</span></button>}
-        <button className="setting-row" onClick={async () => setContacts(await getPhoneContacts())}><Phone /> फोन संपर्क मिलाएँ <span className="row-end">›</span></button>
-        <div className="setting-row static"><Bell /> सूचनाएँ <span className="row-end status-text">{notificationState}</span></div>
-        <div className="setting-row static"><Timer /> अनपढ़ संदेश <span className="row-end status-text">{Object.values(unread).reduce((s, v) => s + Number(v || 0), 0)}</span></div>
-        {contacts.length > 0 && <div className="contact-note">{contacts.length} फोन संपर्क उपलब्ध हैं।</div>}
+        {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
+        <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
+        <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
+        <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? 'चालू' : 'बंद'}</span></button>
         {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> Admin Dashboard खोलें <span className="row-end">›</span></button>}
-        <button className="setting-row danger" onClick={logout}><X /> बाहर निकलें</button>
+        <button className="setting-row danger" onClick={() => setPanel('logout')}><X /> {t('logout')}</button>
       </aside>
     </div>
   );
 }
 
 function AdminPanel({ users, me }) {
-  const [invite, setInvite] = useState('');
-  const [adminCode, setAdminCode] = useState('');
   const [selectedChat, setSelectedChat] = useState(null);
   const [logs, setLogs] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
   const [mirrors, setMirrors] = useState({});
   const [query, setQuery] = useState('');
+  const [removing, setRemoving] = useState(null);
   const [, forceTick] = useState(0);
 
-  useEffect(() => onValue(ref(db, 'config/inviteCode'), s => setInvite(s.val() || '')), []);
-  useEffect(() => onValue(ref(db, 'config/adminCode'), s => setAdminCode(s.val() || '')), []);
   useEffect(() => onValue(ref(db, 'adminMirror'), s => setMirrors(s.val() || {})), []);
   useEffect(() => {
     if (!selectedChat) { setLogs([]); return undefined; }
@@ -478,36 +566,11 @@ function AdminPanel({ users, me }) {
   // without needing a page reload.
   useEffect(() => { const t = setInterval(() => forceTick(x => x + 1), 30000); return () => clearInterval(t); }, []);
 
-  async function save() {
-    setSaving(true);
-    setMsg('');
-    try {
-      await set(ref(db, 'config/inviteCode'), invite.trim());
-      setMsg('नया जोड़ने वाला कोड सेव हो गया।');
-    } catch (e) {
-      setMsg(e.message || 'कोड सेव नहीं हुआ।');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function regenerateInvite() {
-    const code = generateCode('JOIN');
-    setInvite(code);
-    await set(ref(db, 'config/inviteCode'), code).catch(() => {});
-    setMsg('नया जोड़ने वाला कोड बन गया।');
-  }
-
-  async function regenerateAdminCode() {
-    // Note: this only changes the *code*. Since config/adminUid can only ever
-    // be written once (see database.rules.json), regenerating this code does
-    // NOT create a way for a second person to become admin — it's only
-    // useful if you want to invalidate a leaked code before anyone has used
-    // it to claim admin.
-    const code = generateCode('ADMIN');
-    setAdminCode(code);
-    await set(ref(db, 'config/adminCode'), code).catch(() => {});
-    setMsg('नया एडमिन कोड बन गया।');
+  function confirmRemove(u) { setRemoving(u); }
+  async function doRemove() {
+    if (!removing) return;
+    await removeUser(removing.uid).catch(() => {});
+    setRemoving(null);
   }
 
   const ACTIVE_WINDOW = 3 * 60 * 1000; // "chatting right now" = a message in the last 3 minutes
@@ -531,17 +594,6 @@ function AdminPanel({ users, me }) {
       <div><b className={activeChatsNow ? 'on' : ''}>{activeChatsNow}</b><small>अभी सक्रिय (3 मिनट में)</small></div>
     </div>
 
-    <label>जोड़ने वाला कोड (दोस्तों के लिए)<input value={invite} onChange={e => setInvite(e.target.value)} /></label>
-    <div className="admin-actions">
-      <button className="primary" onClick={save} disabled={saving}>{saving ? 'सेव हो रहा है…' : 'कोड सेव करें'}</button>
-      <button className="secondary" onClick={regenerateInvite} disabled={saving}>नया बनाएं</button>
-    </div>
-    <label>एडमिन कोड<input value={adminCode} readOnly /></label>
-    <div className="admin-actions">
-      <button className="secondary" onClick={regenerateAdminCode} disabled={saving}>एडमिन कोड बदलें</button>
-    </div>
-    {msg && <small className="success-text">{msg}</small>}
-
     <div className="search monitor-search"><Search size={17} /><input placeholder="नाम या नंबर से मॉनिटर करें…" value={query} onChange={e => setQuery(e.target.value)} /></div>
 
     <h4>सभी सदस्य</h4>
@@ -550,9 +602,17 @@ function AdminPanel({ users, me }) {
         <Avatar user={u} size="sm" />
         <span className="grow"><b>{u.name}{u.role === 'admin' ? ' 👑' : ''}</b><small>{u.phone || u.email}</small></span>
         <span className={`presence-label ${u.online ? 'on' : ''}`}>{u.online ? 'ऑनलाइन' : formatLastSeen(u.lastSeen)}</span>
+        {u.role !== 'admin' && <button className="remove-btn" onClick={() => confirmRemove(u)}>हटाएं</button>}
       </div>
     ))}
     {!filteredUsers.length && <small>कोई सदस्य नहीं मिला।</small>}
+    {removing && <div className="msg-actions" onClick={() => setRemoving(null)}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <p style={{ padding: '4px 20px 10px' }}>{removing.name} को हटाएं? यह उनकी प्रोफ़ाइल और सभी चैट डेटाबेस से मिटा देगा, और वो अब लॉगिन नहीं कर पाएंगे — पर उनका ईमेल/पासवर्ड Firebase से पूरी तरह मिटाना client ऐप से संभव नहीं, सिर्फ़ एक्सेस बंद होगा।</p>
+        <button className="danger" onClick={doRemove}>हाँ, हटाएं</button>
+        <button className="cancel" onClick={() => setRemoving(null)}>रद्द करें</button>
+      </div>
+    </div>}
 
     <h4>सभी रिकॉर्ड की गई चैट (मॉनिटरिंग)</h4>
     {filteredChats.map(chatId => {
@@ -574,10 +634,17 @@ export default function App() {
   const [me, setMe] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [bannedMsg, setBannedMsg] = useState('');
 
   useEffect(() => {
     if (!auth) { setLoading(false); return undefined; }
     return onAuthStateChanged(auth, async user => {
+      if (user && await isBanned(user.uid)) {
+        await logout().catch(() => {});
+        setBannedMsg('आपकी एक्सेस हटा दी गई है।');
+        setMe(null); setProfile(null); setLoading(false);
+        return;
+      }
       setMe(user);
       if (user) {
         onValue(ref(db, `users/${user.uid}`), s => setProfile(s.val()));
@@ -598,7 +665,13 @@ export default function App() {
     );
   }
   if (loading) return <div className="splash"><img src="/school-chat-icon.png" alt="School Chat" /><span>School Chat</span></div>;
-  if (!me) return <AuthScreen />;
+  if (!me) return <AuthScreen bannedMsg={bannedMsg} />;
   if (!profile) return <CompleteProfileScreen me={me} />;
-  return <AppShell me={me} profile={profile} />;
+  return <LockGate><AppShell me={me} profile={profile} /></LockGate>;
+}
+
+function LockGate({ children }) {
+  const [unlocked, setUnlocked] = useState(!isPinSet());
+  if (!unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />;
+  return children;
 }

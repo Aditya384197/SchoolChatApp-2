@@ -1,0 +1,50 @@
+// Deliberately covers the main user-facing surfaces (auth, settings, chat
+// list, chat screen, logout) rather than every single string in the app
+// (e.g. the admin monitoring internals stay Hindi-only for now) -- kept
+// small on purpose so it's easy to extend later.
+export const translations = {
+  hi: {
+    appName: 'School Chat', tagline: 'अपने समूह से जुड़े रहें',
+    disclosure: 'यह ऐप एडमिन-मॉनिटर्ड है: इस ऐप में होने वाली सभी चैट — आपकी एडमिन से बातचीत और आपस में दो दोस्तों की चैट भी — एडमिन को दिखती हैं। खाता बनाकर आप इससे सहमत हैं।',
+    email: 'ईमेल', password: 'पासवर्ड', phone: 'मोबाइल नंबर', optional: 'वैकल्पिक',
+    name: 'वास्तविक नाम', continueBtn: 'आगे बढ़ें', pleaseWait: 'कृपया प्रतीक्षा करें…',
+    back: 'वापस', start: 'शुरू करें', saving: 'सेव हो रहा है…',
+    login: 'प्रवेश करें', newAccount: 'नया खाता बनाएँ', haveAccount: 'पहले से खाता है? प्रवेश करें',
+    noAccount: 'पहले से खाता नहीं है? नया खाता बनाएँ',
+    phoneHint: 'दोस्तों के फ़ोन कॉन्टैक्ट से आपको जल्दी ढूंढने में मदद करता है — चाहें तो छोड़ सकते हैं।',
+    buildProfile: 'अपनी प्रोफ़ाइल बनाएं', addPhoto: 'फ़ोटो जोड़ें', removePhoto: 'हटाएं',
+    chooseAvatar: 'या एक अवतार चुनें', searchPlaceholder: 'नाम, ईमेल या नंबर खोजें',
+    yourContacts: 'आपके संपर्क', online: 'ऑनलाइन', settings: 'सेटिंग',
+    directChatAdmin: 'Direct Chat to Admin', matchContacts: 'फोन संपर्क मिलाएँ',
+    notifications: 'सूचनाएँ', unreadMessages: 'अनपढ़ संदेश', language: 'भाषा',
+    theme: 'थीम', appLock: 'ऐप लॉक', logout: 'बाहर निकलें',
+    logoutConfirmTitle: 'क्या आप वाकई बाहर निकलना चाहते हैं?', cancel: 'रद्द करें',
+    messagePlaceholder: 'संदेश लिखें…', typing: 'टाइप कर रहा है…', lastSeen: 'अंतिम बार',
+    justOnline: 'अभी-अभी ऑनलाइन था', deleteForMe: 'मेरे लिए हटाएं', deleteForEveryone: 'सबके लिए हटाएं',
+    deletedMessage: 'यह मैसेज हटा दिया गया', cancelDelete: 'रद्द करें',
+    themeLight: 'लाइट', themeDark: 'डार्क', themeSystem: 'सिस्टम डिफ़ॉल्ट',
+    langHindi: 'हिंदी', langEnglish: 'English',
+  },
+  en: {
+    appName: 'School Chat', tagline: 'Stay connected with your group',
+    disclosure: 'This app is admin-monitored: every chat here — your chat with the admin, and chats between any two friends — is visible to the admin. Creating an account means you agree.',
+    email: 'Email', password: 'Password', phone: 'Mobile number', optional: 'optional',
+    name: 'Real name', continueBtn: 'Continue', pleaseWait: 'Please wait…',
+    back: 'Back', start: 'Get started', saving: 'Saving…',
+    login: 'Log in', newAccount: 'Create new account', haveAccount: 'Already have an account? Log in',
+    noAccount: "Don't have an account? Create one",
+    phoneHint: 'Helps friends find you faster from their contacts — you can skip this.',
+    buildProfile: 'Build your profile', addPhoto: 'Add photo', removePhoto: 'Remove',
+    chooseAvatar: 'or pick an avatar', searchPlaceholder: 'Search name, email or number',
+    yourContacts: 'Your contacts', online: 'Online', settings: 'Settings',
+    directChatAdmin: 'Direct Chat to Admin', matchContacts: 'Match phone contacts',
+    notifications: 'Notifications', unreadMessages: 'Unread messages', language: 'Language',
+    theme: 'Theme', appLock: 'App lock', logout: 'Log out',
+    logoutConfirmTitle: 'Are you sure you want to log out?', cancel: 'Cancel',
+    messagePlaceholder: 'Type a message…', typing: 'typing…', lastSeen: 'Last seen',
+    justOnline: 'Online just now', deleteForMe: 'Delete for me', deleteForEveryone: 'Delete for everyone',
+    deletedMessage: 'This message was deleted', cancelDelete: 'Cancel',
+    themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System default',
+    langHindi: 'हिंदी', langEnglish: 'English',
+  }
+};

@@ -12,6 +12,12 @@
       },
       "adminUid": {
         ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
+      },
+      "banned": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+          ".write": "auth != null && auth.uid === root.child('config').child('adminUid').val()"
+        }
       }
     },
     "users": {
@@ -46,7 +52,7 @@
         "messages": {
           "$messageId": {
             ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
-            ".write": "auth != null && (newData.child('senderId').val() === auth.uid || newData.child('receiverId').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())",
+            ".write": "auth != null && ((newData.exists() && (newData.child('senderId').val() === auth.uid || newData.child('receiverId').val() === auth.uid)) || (!newData.exists() && (auth.uid === root.child('config').child('adminUid').val() || (data.child('senderId').val() === auth.uid && data.child('createdAt').val() > (now - 300000)))) || auth.uid === root.child('config').child('adminUid').val())",
             ".validate": "newData.hasChildren(['senderId','receiverId','text','createdAt','delivered','seen']) && root.child('chats').child($chatId).child('participants').child(newData.child('senderId').val()).exists() && root.child('chats').child($chatId).child('participants').child(newData.child('receiverId').val()).exists() && newData.child('text').isString() && newData.child('delivered').isBoolean() && newData.child('seen').isBoolean()"
           }
         }
