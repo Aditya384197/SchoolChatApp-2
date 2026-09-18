@@ -1,89 +1,105 @@
-name: Unzip and Flatten Project
+name: Build School Chat APK
 
-# Trigger: whenever a .zip file is pushed/uploaded to the repo root (also
-# runnable manually from the Actions tab via "Run workflow").
 on:
-  push:
-    paths:
-      - '**.zip'
   workflow_dispatch:
-
-# Needed so this workflow's own commit/push back to the repo is allowed.
-permissions:
-  contents: write
+  push:
+    branches: [ main ]
 
 jobs:
-  unzip:
-    name: Extract uploaded zip into repo root
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
         with:
-          fetch-depth: 0
+          node-version: 22
 
-      - name: Extract every zip at repo root and flatten into root
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Install image tooling
+        run: python3 -m pip install --user Pillow
+
+      - name: Add Android platform and sync plugins
         run: |
-          set -e
-          shopt -s nullglob
+          npx cap add android
+          npx cap sync android
 
-          # Exact filename of the project zip you upload to repo root.
-          # If you upload a zip with a different name later, this still
-          # works — it's just checked first, then any other *.zip is
-          # picked up automatically below.
-          KNOWN_ZIP="ESP32-Flasher-PROJECT-NO-GITHUB-FOLDER.zip"
-
-          zips=(*.zip)
-          if [ -f "$KNOWN_ZIP" ]; then
-            echo "Found known zip: $KNOWN_ZIP"
-          fi
-
-          if [ ${#zips[@]} -eq 0 ]; then
-            echo "No .zip file found at repo root. Nothing to do."
-            exit 0
-          fi
-
-          for zipfile in "${zips[@]}"; do
-            echo "=== Extracting: $zipfile ==="
-            tmpdir=$(mktemp -d)
-            unzip -o "$zipfile" -d "$tmpdir" > /dev/null
-
-            # If the zip has a single top-level wrapper folder (common with
-            # GitHub-style "project-main/" exports), descend into it so its
-            # *contents* land at repo root instead of the wrapper itself.
-            src="$tmpdir"
-            entries=("$tmpdir"/*)
-            if [ ${#entries[@]} -eq 1 ] && [ -d "${entries[0]}" ]; then
-              src="${entries[0]}"
-              echo "Detected single wrapper folder: $(basename "$src")"
-            fi
-
-            # Copy everything into repo root EXCEPT .github — the default
-            # GITHUB_TOKEN this workflow runs with is never allowed to
-            # create/modify files under .github/workflows/, and a push that
-            # tries to will simply fail. Add/update workflow files manually
-            # instead (GitHub web UI: Add file > Create new file).
-            find "$src" -mindepth 1 -maxdepth 1 ! -name '.github' -exec cp -a -t . {} +
-
-            rm -rf "$tmpdir"
-            git rm -f "$zipfile" > /dev/null
-            echo "=== Done: $zipfile ==="
-          done
-
-      - name: Commit and push extracted files
+      - name: Apply School Chat launcher icon
         run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          res = Path('android/app/src/main/res')
+          src = Image.open('public/school-chat-icon.png').convert('RGBA')
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in sizes.items():
+              out = res / folder
+              out.mkdir(parents=True, exist_ok=True)
+              img = src.resize((size, size), Image.Resampling.LANCZOS)
+              img.save(out / 'ic_launcher.png')
+              img.save(out / 'ic_launcher_round.png')
+              img.save(out / 'ic_launcher_foreground.png')
 
-          # Belt-and-braces: never stage anything under .github, even if it
-          # somehow ended up on disk (e.g. a leftover from a previous run).
-          git add -A -- . ':!.github'
+          # Android 8+ (API 26+) ignores the flat PNGs above whenever an
+          # adaptive-icon selector exists at mipmap-anydpi-v26/ic_launcher.xml
+          # -- Capacitor's default template ships one pointing at its own
+          # placeholder foreground/background, which is exactly the
+          # "launcher icon looks completely different" symptom. Removing the
+          # selector makes Android fall back to the flat PNGs above on every
+          # API level, so our real icon actually shows.
+          anydpi = res / 'mipmap-anydpi-v26'
+          for name in ('ic_launcher.xml', 'ic_launcher_round.xml'):
+              f = anydpi / name
+              if f.exists():
+                  f.unlink()
+          PY
 
-          if git diff --cached --quiet; then
-            echo "Nothing to commit."
-            exit 0
+      - name: Verify web assets were copied into the Android project
+        run: |
+          if [ ! -f "android/app/src/main/assets/public/index.html" ]; then
+            echo "::error::android/app/src/main/assets/public/index.html नहीं मिली — 'npx cap sync' ने web build कॉपी नहीं की।"
+            exit 1
           fi
+          echo "Web assets ठीक से Android प्रोजेक्ट में कॉपी हो गए।"
 
-          git commit -m "Auto-extract uploaded project zip"
-          git push
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Google removed the legacy standalone "tools" package from the SDK
+          # repository index; the action's default `packages` input
+          # ("tools platform-tools") now fails with "Failed to find package
+          # 'tools'" before the build even starts. platform-tools is the only
+          # thing we need from this step — Gradle/AGP fetches the actual
+          # platform + build-tools it needs on demand during assembleDebug.
+          packages: 'platform-tools'
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: school-chat-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
