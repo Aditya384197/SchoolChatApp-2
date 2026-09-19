@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref } from 'firebase/database';
 import {
-  ArrowLeft, Bell, MessageCircle, Search, Send,
-  ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare
+  ArrowLeft, MessageCircle, Search, Send,
+  ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare,
+  Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
 import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile } from './lib/auth';
@@ -18,6 +19,9 @@ import { prepareNotifications, showMessageNotification } from './lib/notificatio
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
 import { isPinSet, LockScreen, PinPad, clearPin } from './components/AppLock';
 import { usePrefs } from './context/Prefs';
+import { StatusViewer } from './components/StatusViewer';
+import { postStatus, cleanupExpiredStatus } from './lib/status';
+import { uploadStatusMedia } from './lib/media';
 
 function formatLastSeen(ts) {
   if (!ts) return 'अंतिम बार उपलब्ध नहीं';
@@ -224,11 +228,35 @@ function MessageBubble({ me, message, onSeen, onLongPress }) {
 function MessageActionSheet({ message, me, chatId, onClose }) {
   const mine = message.senderId === me.uid;
   const withinWindow = mine && message.createdAt && (Date.now() - message.createdAt < DELETE_WINDOW_MS);
+  const [copied, setCopied] = useState(false);
+
+  async function copyText() {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      setCopied(true);
+      setTimeout(onClose, 500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  async function shareText() {
+    if (navigator.share) {
+      try { await navigator.share({ text: message.text }); } catch { /* user cancelled */ }
+      onClose();
+    } else {
+      copyText();
+    }
+  }
+
   return (
     <div className="msg-actions" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()}>
-        <button onClick={async () => { await deleteMessageForMe(me.uid, chatId, message.id); onClose(); }}>{`मेरे लिए हटाएं`}</button>
-        {withinWindow && <button className="danger" onClick={async () => { await deleteMessageForEveryone(chatId, message.id); onClose(); }}>{`सबके लिए हटाएं`}</button>}
+      <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <button onClick={copyText}><Copy size={18} /> {copied ? 'कॉपी हो गया' : 'कॉपी करें'}</button>
+        <button onClick={shareText}><Share2 size={18} /> शेयर करें</button>
+        <button onClick={async () => { await deleteMessageForMe(me.uid, chatId, message.id); onClose(); }}><X size={18} /> मेरे लिए हटाएं</button>
+        {withinWindow && <button className="danger" onClick={async () => { await deleteMessageForEveryone(chatId, message.id); onClose(); }}><X size={18} /> सबके लिए हटाएं</button>}
         <button className="cancel" onClick={onClose}>रद्द करें</button>
       </div>
     </div>
@@ -244,6 +272,7 @@ function Chat({ me, user, onBack }) {
   const [sending, setSending] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
   const listRef = useRef(null);
+  const inputRef = useRef(null);
   const typingTimer = useRef(null);
   const typingActive = useRef(false);
 
@@ -301,6 +330,9 @@ function Chat({ me, user, onBack }) {
       await sendMessage(chatId, me.uid, user.uid, value);
     } finally {
       setSending(false);
+      // Keep the keyboard open for the next message instead of it dropping
+      // away after every send.
+      inputRef.current?.focus();
     }
   }
 
@@ -322,7 +354,7 @@ function Chat({ me, user, onBack }) {
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
       <form className="composer" onSubmit={submit}>
-        <input value={text} onChange={e => handleTyping(e.target.value)} placeholder="संदेश लिखें…" />
+        <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder="संदेश लिखें…" />
         <button className="send" disabled={sending}><Send size={20} /></button>
       </form>
       {actionMsg && <MessageActionSheet message={actionMsg} me={me} chatId={chatId} onClose={() => setActionMsg(null)} />}
@@ -339,6 +371,9 @@ function AppShell({ me, profile }) {
   const [previews, setPreviews] = useState({});
   const [notificationsReady, setNotificationsReady] = useState(false);
   const [view, setView] = useState('chats'); // 'chats' | 'admin' — admin gets its own tab, not just a settings sub-panel
+  const [statusUids, setStatusUids] = useState(new Set());
+  const [statusOwner, setStatusOwner] = useState(null); // whose status is being viewed
+  const [composing, setComposing] = useState(false);
 
   useEffect(() => onValue(ref(db, 'users'), s => {
     const all = s.val() || {};
@@ -349,7 +384,18 @@ function AppShell({ me, profile }) {
   useEffect(() => {
     startPresence(me.uid);
     prepareNotifications().then(setNotificationsReady);
+    cleanupExpiredStatus(me.uid).catch(() => {});
   }, [me.uid]);
+
+  useEffect(() => onValue(ref(db, 'statuses'), snap => {
+    const all = snap.val() || {};
+    const now = Date.now();
+    const withActive = new Set();
+    Object.entries(all).forEach(([uid, list]) => {
+      if (Object.values(list || {}).some(s => s.expiresAt > now)) withActive.add(uid);
+    });
+    setStatusUids(withActive);
+  }), []);
 
   // One listener per contact does double duty: foreground notifications for
   // incoming messages, and the last-message preview + recency sort in the
@@ -413,23 +459,41 @@ function AppShell({ me, profile }) {
           <img src="/school-chat-icon.png" alt="" />
           <div><b>School Chat</b><small>नमस्ते, {profile.name}</small></div>
         </div>
-        <button className="icon notification-icon" onClick={() => setSettings(true)}>
-          <Bell />{totalUnread > 0 && <span className="badge">{totalUnread > 99 ? '99+' : totalUnread}</span>}
+        <button className="icon settings-icon" onClick={() => setSettings(true)}>
+          <SettingsIcon />{totalUnread > 0 && <span className="badge">{totalUnread > 99 ? '99+' : totalUnread}</span>}
         </button>
       </header>
       <main className="content">
         <div className="search"><Search size={19} /><input placeholder="नाम, ईमेल या नंबर खोजें" value={query} onChange={e => setQuery(e.target.value)} /></div>
+
+        <div className="status-row">
+          <button
+            className={`status-avatar-btn ${statusUids.has(me.uid) ? 'has-status' : ''}`}
+            onClick={() => statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true)}
+          >
+            <Avatar user={profile} size="md" />
+            {!statusUids.has(me.uid) && <span className="status-plus">+</span>}
+          </button>
+          <button className="grow status-row-text" onClick={() => statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true)}>
+            <b>आपका स्टेटस</b><small>{statusUids.has(me.uid) ? 'देखने के लिए टैप करें' : 'स्टेटस जोड़ने के लिए टैप करें'}</small>
+          </button>
+        </div>
+
         <div className="section-title"><h3>आपके संपर्क</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} ऑनलाइन</span></div>
         {filtered.map(u => {
           const preview = previews[chatIdFor(me.uid, u.uid)];
           const subtitle = preview ? `${preview.mine ? 'आप: ' : ''}${preview.text}` : (u.online ? 'ऑनलाइन' : formatLastSeen(u.lastSeen));
           return (
-            <button className="user-row" key={u.uid} onClick={() => setChatUser(u)}>
-              <div className="avatar-wrap"><Avatar user={u} /> {u.online && <span className="presence-dot" />}</div>
-              <div className="grow"><b>{u.name}</b><small className="truncate">{subtitle}</small></div>
+            <div className="user-row" key={u.uid}>
+              <button className={`avatar-wrap ${statusUids.has(u.uid) ? 'has-status' : ''}`} onClick={() => setStatusOwner(u)}>
+                <Avatar user={u} /> {u.online && <span className="presence-dot" />}
+              </button>
+              <button className="grow user-row-text" onClick={() => setChatUser(u)}>
+                <b>{u.name}</b><small className="truncate">{subtitle}</small>
+              </button>
               {unread[chatIdFor(me.uid, u.uid)] > 0 && <span className="row-unread">{unread[chatIdFor(me.uid, u.uid)]}</span>}
-              <MessageCircle size={20} />
-            </button>
+              <button className="icon" onClick={() => setChatUser(u)}><MessageCircle size={20} /></button>
+            </div>
           );
         })}
         {!filtered.length && <div className="empty"><Users size={38} /><p>कोई उपयोगकर्ता नहीं मिला।</p></div>}
@@ -439,7 +503,85 @@ function AppShell({ me, profile }) {
         onClose={() => setSettings(false)} onOpenChat={setChatUser}
         onOpenAdmin={() => { setSettings(false); setView('admin'); }}
       />}
+      {statusOwner && <StatusViewer owner={statusOwner} me={me} onClose={() => setStatusOwner(null)} />}
+      {composing && <StatusComposer me={me} onClose={() => setComposing(false)} />}
       {isAdmin && <AdminTabBar view={view} setView={setView} />}
+    </div>
+  );
+}
+
+function StatusComposer({ me, onClose }) {
+  const [tab, setTab] = useState('text');
+  const [text, setText] = useState('');
+  const [bg, setBg] = useState('#0f6fe8');
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+  const BG_CHOICES = ['#0f6fe8', '#16a34a', '#dc2626', '#7c3aed', '#0f172a', '#ea580c'];
+
+  function pickFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setFile(f);
+    setPreview(URL.createObjectURL(f));
+  }
+
+  async function publish() {
+    setError(''); setBusy(true);
+    try {
+      if (tab === 'text') {
+        if (!text.trim()) { setError('कुछ लिखें।'); setBusy(false); return; }
+        await postStatus(me.uid, { type: 'text', content: JSON.stringify({ text: text.trim(), bg }) });
+      } else {
+        if (!file) { setError(tab === 'photo' ? 'एक फ़ोटो चुनें।' : 'एक वीडियो चुनें।'); setBusy(false); return; }
+        const statusId = `${Date.now()}`;
+        const url = await uploadStatusMedia(me.uid, statusId, file);
+        await postStatus(me.uid, { type: tab === 'photo' ? 'image' : 'video', content: url });
+      }
+      onClose();
+    } catch (e) {
+      setError(e.message || 'स्टेटस पोस्ट नहीं हो सका।');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="status-composer-overlay" onClick={onClose}>
+      <div className="status-composer" onClick={e => e.stopPropagation()}>
+        <div className="drawer-head"><b>स्टेटस लगाएं</b><button className="icon" onClick={onClose}><X /></button></div>
+        <div className="composer-tabs">
+          <button className={tab === 'text' ? 'active' : ''} onClick={() => { setTab('text'); setFile(null); setPreview(''); }}><TypeIcon size={16} /> टेक्स्ट</button>
+          <button className={tab === 'photo' ? 'active' : ''} onClick={() => setTab('photo')}><ImageIcon size={16} /> फ़ोटो</button>
+          <button className={tab === 'video' ? 'active' : ''} onClick={() => setTab('video')}><Video size={16} /> वीडियो</button>
+        </div>
+
+        {tab === 'text' && (
+          <div className="status-text-preview" style={{ background: bg }}>
+            <textarea value={text} onChange={e => setText(e.target.value)} placeholder="कुछ लिखें…" maxLength={200} />
+          </div>
+        )}
+        {tab === 'text' && (
+          <div className="bg-choices">
+            {BG_CHOICES.map(c => <button key={c} className={bg === c ? 'active' : ''} style={{ background: c }} onClick={() => setBg(c)} />)}
+          </div>
+        )}
+
+        {tab !== 'text' && (
+          <button type="button" className="media-pick-box" onClick={() => fileRef.current?.click()}>
+            {preview
+              ? (tab === 'photo' ? <img src={preview} alt="" /> : <video src={preview} muted playsInline />)
+              : <span>{tab === 'photo' ? 'फ़ोटो चुनें' : 'वीडियो चुनें (अधिकतम 15MB)'}</span>}
+          </button>
+        )}
+        <input ref={fileRef} type="file" hidden accept={tab === 'photo' ? 'image/*' : 'video/*'} onChange={pickFile} />
+
+        {error && <div className="error">{error}</div>}
+        <button className="primary status-publish" onClick={publish} disabled={busy}>{busy ? 'पोस्ट हो रहा है…' : 'स्टेटस पोस्ट करें'}</button>
+      </div>
     </div>
   );
 }

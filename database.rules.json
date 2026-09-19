@@ -63,6 +63,48 @@
         ".read": "auth != null && auth.uid === root.child('config').child('adminUid').val()",
         ".write": "auth != null && (auth.uid === root.child('config').child('adminUid').val() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())"
       }
+    },
+    "statuses": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        "$statusId": {
+          ".validate": "newData.hasChildren(['type','content','createdAt','expiresAt'])"
+        }
+      }
+    },
+    "statusViews": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        "$statusId": {
+          "$viewerUid": {
+            ".write": "auth != null && (auth.uid === $viewerUid || auth.uid === root.child('config').child('adminUid').val())",
+            ".validate": "newData.val() === true"
+          }
+        }
+      }
+    },
+    "statusReactions": {
+      "$uid": {
+        ".read": "auth != null",
+        "$statusId": {
+          "$viewerUid": {
+            ".write": "auth != null && (auth.uid === $viewerUid || auth.uid === root.child('config').child('adminUid').val())",
+            ".validate": "newData.isString()"
+          }
+        }
+      }
+    },
+    "statusComments": {
+      "$uid": {
+        ".read": "auth != null",
+        "$statusId": {
+          "$commentId": {
+            ".write": "auth != null && (!newData.exists() ? (data.child('from').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val()) : (newData.child('from').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val()))",
+            ".validate": "newData.hasChildren(['from','text','createdAt'])"
+          }
+        }
+      }
     }
   }
 }
