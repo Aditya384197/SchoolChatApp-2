@@ -166,3 +166,20 @@
 
 .settings-icon{position:relative}
 .toast-exit{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 18px;border-radius:24px;font-size:13px;z-index:200;box-shadow:0 8px 24px #0000004d}
+/* Disable native text-selection app-wide by default (long-pressing a
+   contact's name, a settings row, etc. used to pop up the phone's own
+   select/copy UI, which looked broken next to our own custom action
+   sheets). Selection is explicitly re-enabled only where copying real
+   content makes sense: form fields, and the admin's read-only chat
+   transcript viewer. */
+*{-webkit-touch-callout:none}
+body,button,.user-row,.setting-row,.monitor-row,.topbar,.status-row,h1,h2,h3,h4,b,small,p{user-select:none;-webkit-user-select:none}
+input,textarea{user-select:text;-webkit-user-select:text}
+.admin-transcript,.admin-transcript *{user-select:text !important;-webkit-user-select:text !important}
+.bubble.selected{outline:2px solid #0f6fe8;outline-offset:-2px}
+.topbar.selection-bar{gap:6px}
+.topbar.selection-bar .icon{flex-shrink:0}
+.brand-line.as-button{background:none;border:none;padding:0;text-align:left}
+.update-panel{padding:0 4px}
+.update-panel p{margin:0 0 12px}
+.update-panel .primary{width:100%}

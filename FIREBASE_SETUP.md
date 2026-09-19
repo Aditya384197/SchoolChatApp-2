@@ -18,6 +18,11 @@ Database → Rules में `database.rules.json` की पूरी साम
 ## 3b. Storage (status की फ़ोटो/वीडियो के लिए)
 Firebase Console → Build → Storage → Get started (डिफ़ॉल्ट bucket काफ़ी है) → Rules टैब में इस repo की `storage.rules` की सामग्री लागू करें। बिना इसके स्टेटस पर फ़ोटो/वीडियो अपलोड फेल होगा (टेक्स्ट स्टेटस फिर भी काम करेगा, वो Storage इस्तेमाल नहीं करता)।
 
+## 3c. Storage अभी भी काम नहीं कर रहा? यह जाँचें
+- Console → Storage खोलकर देखें कि ऊपर एक असली bucket नाम दिख रहा है (सिर्फ़ "Get started" pending नहीं है) — अगर अभी भी "Get started" बटन दिख रहा है, तो enable करना पूरा नहीं हुआ।
+- Console → Storage → **Rules** टैब खोलें — वहाँ *ठीक* इस repo की `storage.rules` वाली सामग्री दिखनी चाहिए, और वहाँ **Publish** बटन दबाया हुआ होना चाहिए (सिर्फ़ टेक्स्ट बॉक्स में पेस्ट करना काफ़ी नहीं, Publish ज़रूरी है)।
+- नए build में अब स्टेटस पोस्ट करते वक्त एरर आए तो उसमें एक कोड जैसा दिखेगा (जैसे `storage/unauthorized` या `storage/unknown`) — वो कोड आगे मुझे बताएं तो सही वजह पक्के तौर पर पता चल जाएगी।
+
 ## 4. Firebase Web configuration
 `apiKey`, `messagingSenderId` और `appId` सीधे `src/firebase.js` में लिखे हुए हैं (आपके Firebase console की "Your apps" स्क्रीन से लिए गए असली वैल्यू)। GitHub secrets या `.env` की ज़रूरत नहीं — Firebase का web `apiKey` वैसे भी गुप्त रखने वाली चीज़ नहीं होती (Google खुद यही कहता है); असली सुरक्षा Authentication + `database.rules.json` से आती है।
 

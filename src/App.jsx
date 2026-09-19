@@ -4,7 +4,8 @@ import { onValue, ref } from 'firebase/database';
 import {
   ArrowLeft, MessageCircle, Search, Send,
   ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare,
-  Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon
+  Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon,
+  Trash2, CheckSquare, Check, LogOut, User, RefreshCw
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
 import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile } from './lib/auth';
@@ -24,6 +25,7 @@ import { postStatus, cleanupExpiredStatus } from './lib/status';
 import { uploadStatusMedia } from './lib/media';
 import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
+import { APP_VERSION, UPDATE_URL } from './appMeta';
 
 function formatLastSeen(ts) {
   if (!ts) return 'अंतिम बार उपलब्ध नहीं';
@@ -206,15 +208,19 @@ function CompleteProfileScreen({ me }) {
   );
 }
 
-function MessageBubble({ me, message, onSeen, onLongPress }) {
+function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, selected, onToggleSelect }) {
   const mine = message.senderId === me.uid;
   const pressTimer = useRef(null);
-  function start() { pressTimer.current = setTimeout(() => onLongPress(message), 550); }
+  function start() { if (!selectionMode) pressTimer.current = setTimeout(() => onLongPress(message), 500); }
   function stop() { clearTimeout(pressTimer.current); }
+  function tap() {
+    if (selectionMode) { onToggleSelect(message.id); return; }
+    if (!mine) onSeen(message.id);
+  }
   return (
     <div
-      className={`bubble ${mine ? 'mine' : 'theirs'}`}
-      onClick={() => !mine && onSeen(message.id)}
+      className={`bubble ${mine ? 'mine' : 'theirs'} ${selected ? 'selected' : ''}`}
+      onClick={tap}
       onPointerDown={start} onPointerUp={stop} onPointerLeave={stop}
       onContextMenu={e => { e.preventDefault(); onLongPress(message); }}
     >
@@ -227,39 +233,14 @@ function MessageBubble({ me, message, onSeen, onLongPress }) {
   );
 }
 
-function MessageActionSheet({ message, me, chatId, onClose }) {
+function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDeleteForEveryone }) {
   useBackHandler(onClose);
-  const mine = message.senderId === me.uid;
-  const withinWindow = mine && message.createdAt && (Date.now() - message.createdAt < DELETE_WINDOW_MS);
-  const [copied, setCopied] = useState(false);
-
-  async function copyText() {
-    try {
-      await navigator.clipboard.writeText(message.text);
-      setCopied(true);
-      setTimeout(onClose, 500);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  async function shareText() {
-    if (navigator.share) {
-      try { await navigator.share({ text: message.text }); } catch { /* user cancelled */ }
-      onClose();
-    } else {
-      copyText();
-    }
-  }
-
   return (
     <div className="msg-actions" onClick={onClose}>
       <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
-        <button onClick={copyText}><Copy size={18} /> {copied ? 'कॉपी हो गया' : 'कॉपी करें'}</button>
-        <button onClick={shareText}><Share2 size={18} /> शेयर करें</button>
-        <button onClick={async () => { await deleteMessageForMe(me.uid, chatId, message.id); onClose(); }}><X size={18} /> मेरे लिए हटाएं</button>
-        {withinWindow && <button className="danger" onClick={async () => { await deleteMessageForEveryone(chatId, message.id); onClose(); }}><X size={18} /> सबके लिए हटाएं</button>}
+        <button onClick={onDeleteForMe}><Trash2 size={18} /> मेरे लिए हटाएं</button>
+        {canDeleteForEveryone && <button className="danger" onClick={onDeleteForEveryone}><Trash2 size={18} /> सबके लिए हटाएं</button>}
         <button className="cancel" onClick={onClose}>रद्द करें</button>
       </div>
     </div>
@@ -267,18 +248,23 @@ function MessageActionSheet({ message, me, chatId, onClose }) {
 }
 
 function Chat({ me, user, onBack }) {
-  useBackHandler(onBack);
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
   const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
   const [typingUsers, setTypingUsers] = useState({});
   const [sending, setSending] = useState(false);
-  const [actionMsg, setActionMsg] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false);
+  const [copiedTick, setCopiedTick] = useState(false);
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimer = useRef(null);
   const typingActive = useRef(false);
+  const selectionMode = selectedIds.size > 0;
+
+  function clearSelection() { setSelectedIds(new Set()); }
+  useBackHandler(selectionMode ? clearSelection : onBack);
 
   useEffect(() => listenMessages(chatId, setMessages), [chatId]);
   useEffect(() => listenHidden(me.uid, chatId, setHidden), [chatId, me.uid]);
@@ -340,28 +326,97 @@ function Chat({ me, user, onBack }) {
     }
   }
 
+  const visibleMessages = messages.filter(m => !hidden[m.id]);
+  const selectedMsgs = visibleMessages.filter(m => selectedIds.has(m.id));
+  const allSelected = visibleMessages.length > 0 && selectedIds.size === visibleMessages.length;
+  const canDeleteForEveryone = selectedMsgs.length > 0 && selectedMsgs.every(
+    m => m.senderId === me.uid && m.createdAt && (Date.now() - m.createdAt < DELETE_WINDOW_MS)
+  );
+
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function selectAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(visibleMessages.map(m => m.id)));
+  }
+  function joinedText() {
+    return [...selectedMsgs].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map(m => m.text).join('\n');
+  }
+  async function copySelected() {
+    try {
+      await navigator.clipboard.writeText(joinedText());
+      setCopiedTick(true);
+      setTimeout(() => { setCopiedTick(false); clearSelection(); }, 500);
+    } catch { /* clipboard unavailable */ }
+  }
+  async function shareSelected() {
+    if (navigator.share) {
+      try { await navigator.share({ text: joinedText() }); } catch { /* user cancelled */ }
+    } else {
+      await copySelected();
+    }
+    clearSelection();
+  }
+  async function deleteForMeBulk() {
+    await Promise.all([...selectedIds].map(id => deleteMessageForMe(me.uid, chatId, id)));
+    setShowDeleteSheet(false); clearSelection();
+  }
+  async function deleteForEveryoneBulk() {
+    await Promise.all([...selectedIds].map(id => deleteMessageForEveryone(chatId, id)));
+    setShowDeleteSheet(false); clearSelection();
+  }
+
   const otherTyping = Boolean(typingUsers[user.uid]);
   return (
     <div className="screen chat-screen">
-      <header className="topbar">
-        <button className="icon" onClick={onBack}><ArrowLeft /></button>
-        <Avatar user={user} size="sm" />
-        <div className="chat-title">
-          <b>{user.name}</b>
-          <small>{user.online ? 'ऑनलाइन' : formatLastSeen(user.lastSeen)}</small>
-          {otherTyping && <span className="typing-label">टाइप कर रहा है…</span>}
-        </div>
-        <div className="online-dot" title={user.online ? 'ऑनलाइन' : 'ऑफलाइन'} />
-      </header>
+      {selectionMode ? (
+        <header className="topbar selection-bar">
+          <button className="icon" onClick={clearSelection}><X /></button>
+          <b className="grow">{selectedIds.size} चुने गए</b>
+          <button className="icon" onClick={selectAll} title="सभी चुनें"><CheckSquare size={20} /></button>
+          <button className="icon" onClick={copySelected} title="कॉपी करें">{copiedTick ? <Check size={20} /> : <Copy size={20} />}</button>
+          <button className="icon" onClick={shareSelected} title="शेयर करें"><Share2 size={20} /></button>
+          <button className="icon" onClick={() => setShowDeleteSheet(true)} title="हटाएं"><Trash2 size={20} /></button>
+        </header>
+      ) : (
+        <header className="topbar">
+          <button className="icon" onClick={onBack}><ArrowLeft /></button>
+          <Avatar user={user} size="sm" />
+          <div className="chat-title">
+            <b>{user.name}</b>
+            <small>{user.online ? 'ऑनलाइन' : formatLastSeen(user.lastSeen)}</small>
+            {otherTyping && <span className="typing-label">टाइप कर रहा है…</span>}
+          </div>
+          <div className="online-dot" title={user.online ? 'ऑनलाइन' : 'ऑफलाइन'} />
+        </header>
+      )}
       <div className="messages" ref={listRef}>
-        {messages.filter(m => !hidden[m.id]).map(m => <MessageBubble key={m.id} me={me} message={m} onSeen={id => markSeen(chatId, id).catch(() => {})} onLongPress={setActionMsg} />)}
+        {visibleMessages.map(m => (
+          <MessageBubble
+            key={m.id} me={me} message={m}
+            onSeen={id => markSeen(chatId, id).catch(() => {})}
+            onLongPress={msg => setSelectedIds(new Set([msg.id]))}
+            selectionMode={selectionMode} selected={selectedIds.has(m.id)} onToggleSelect={toggleSelect}
+          />
+        ))}
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
       <form className="composer" onSubmit={submit}>
         <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder="संदेश लिखें…" />
         <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
-      {actionMsg && <MessageActionSheet message={actionMsg} me={me} chatId={chatId} onClose={() => setActionMsg(null)} />}
+      {showDeleteSheet && (
+        <BulkDeleteSheet
+          canDeleteForEveryone={canDeleteForEveryone}
+          onClose={() => setShowDeleteSheet(false)}
+          onDeleteForMe={deleteForMeBulk}
+          onDeleteForEveryone={deleteForEveryoneBulk}
+        />
+      )}
     </div>
   );
 }
@@ -460,29 +515,16 @@ function AppShell({ me, profile }) {
   return (
     <div className="screen">
       <header className="topbar">
-        <div className="brand-line">
-          <img src="/school-chat-icon.png" alt="" />
-          <div><b>School Chat</b><small>नमस्ते, {profile.name}</small></div>
-        </div>
+        <button className="brand-line as-button" onClick={() => setSettings(true)}>
+          <Avatar user={profile} size="sm" />
+          <div><b>School Chat</b></div>
+        </button>
         <button className="icon settings-icon" onClick={() => setSettings(true)}>
           <SettingsIcon />{totalUnread > 0 && <span className="badge">{totalUnread > 99 ? '99+' : totalUnread}</span>}
         </button>
       </header>
       <main className="content">
         <div className="search"><Search size={19} /><input placeholder="नाम, ईमेल या नंबर खोजें" value={query} onChange={e => setQuery(e.target.value)} /></div>
-
-        <div className="status-row">
-          <button
-            className={`status-avatar-btn ${statusUids.has(me.uid) ? 'has-status' : ''}`}
-            onClick={() => statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true)}
-          >
-            <Avatar user={profile} size="md" />
-            {!statusUids.has(me.uid) && <span className="status-plus">+</span>}
-          </button>
-          <button className="grow status-row-text" onClick={() => statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true)}>
-            <b>आपका स्टेटस</b><small>{statusUids.has(me.uid) ? 'देखने के लिए टैप करें' : 'स्टेटस जोड़ने के लिए टैप करें'}</small>
-          </button>
-        </div>
 
         <div className="section-title"><h3>आपके संपर्क</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} ऑनलाइन</span></div>
         {filtered.map(u => {
@@ -507,6 +549,8 @@ function AppShell({ me, profile }) {
         me={me} profile={profile} adminUser={adminUser}
         onClose={() => setSettings(false)} onOpenChat={setChatUser}
         onOpenAdmin={() => { setSettings(false); setView('admin'); }}
+        onOpenMyStatus={() => { setSettings(false); statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true); }}
+        hasMyStatus={statusUids.has(me.uid)}
       />}
       {statusOwner && <StatusViewer owner={statusOwner} me={me} onClose={() => setStatusOwner(null)} />}
       {composing && <StatusComposer me={me} onClose={() => setComposing(false)} />}
@@ -549,7 +593,9 @@ function StatusComposer({ me, onClose }) {
       }
       onClose();
     } catch (e) {
-      setError(e.message || 'स्टेटस पोस्ट नहीं हो सका।');
+      console.error('Status publish failed:', e);
+      const code = e?.code ? ` (${e.code})` : '';
+      setError((e.message || 'स्टेटस पोस्ट नहीं हो सका।') + code);
     } finally {
       setBusy(false);
     }
@@ -634,7 +680,7 @@ function ProfileEditPanel({ me, profile, onClose }) {
   );
 }
 
-function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin }) {
+function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, hasMyStatus }) {
   const { t, lang, setLang, theme, setTheme } = usePrefs();
   const [panel, setPanel] = useState('main');
   const panelRef = useRef(panel);
@@ -673,6 +719,15 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>ऐप लॉक हटाएं</button>}
   </aside></div>;
 
+  if (panel === 'update') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="drawer-head"><b>अपडेट</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <div className="update-panel">
+      <p>वर्तमान वर्ज़न: <b>v{APP_VERSION}</b></p>
+      <p className="muted small">नया वर्ज़न इंस्टॉल करने पर यह अपने-आप पुराने की जगह ले लेगा (uninstall करने की ज़रूरत नहीं) — जब तक दोनों एक ही जगह से बने हों।</p>
+      <button className="primary" onClick={() => window.open(UPDATE_URL, '_blank')}>नया वर्ज़न देखें</button>
+    </div>
+  </aside></div>;
+
   if (panel === 'logout') return <div className="overlay" onClick={onClose}><div className="logout-confirm" onClick={e => e.stopPropagation()}>
     <b>{t('logoutConfirmTitle')}</b>
     <div className="step-actions" style={{ width: '100%', maxWidth: 260 }}>
@@ -685,17 +740,16 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <div className="overlay" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
         <div className="drawer-head"><b>{t('settings')}</b><button className="icon" onClick={onClose}><X /></button></div>
-        <button className="setting-user as-row" onClick={() => setPanel('editProfile')}>
-          <Avatar user={profile} size="lg" /><b>{profile.name}</b>
-          <span className="edit-pencil">✎</span>
-        </button>
         <p className="disclosure small">यह ऐप एडमिन-मॉनिटर्ड है — सभी चैट एडमिन को दिख सकती हैं।</p>
+        <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> प्रोफ़ाइल <span className="row-end">›</span></button>
+        <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> स्टेटस <span className="row-end status-text">{hasMyStatus ? 'लगा हुआ है' : 'लगाएं'}</span></button>
         {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
         <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
         <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
         <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? 'चालू' : 'बंद'}</span></button>
+        <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> अपडेट <span className="row-end status-text">v{APP_VERSION}</span></button>
         {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> Admin Dashboard खोलें <span className="row-end">›</span></button>}
-        <button className="setting-row danger" onClick={() => setPanel('logout')}><X /> {t('logout')}</button>
+        <button className="setting-row danger" onClick={() => setPanel('logout')}><LogOut /> {t('logout')}</button>
       </aside>
     </div>
   );
@@ -741,6 +795,22 @@ function AdminPanel({ users, me }) {
   const filteredUsers = q ? users.filter(u => (u.name || '').toLowerCase().includes(q) || (u.phone || '').includes(q) || (u.email || '').toLowerCase().includes(q)) : users;
   const filteredChats = q ? mirroredChats.filter(id => chatLabel(id).toLowerCase().includes(q) || (mirrors[id]?.lastMessage || '').toLowerCase().includes(q)) : mirroredChats;
 
+  if (selectedChat) {
+    return (
+      <div className="screen">
+        <header className="topbar">
+          <button className="icon" onClick={() => setSelectedChat(null)}><ArrowLeft /></button>
+          <b className="grow">{chatLabel(selectedChat)}</b>
+        </header>
+        <div className="content admin-transcript">
+          {logs.length
+            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? 'आप' : users.find(u => u.uid === m.senderId)?.name || 'उपयोगकर्ता'}</b>: {m.text}</div>)
+            : <small>इस चैट में अभी कोई संदेश नहीं है।</small>}
+        </div>
+      </div>
+    );
+  }
+
   return <div className="admin">
     <div className="admin-title"><ShieldCheck size={18} /><h3>एडमिन नियंत्रण</h3></div>
 
@@ -783,7 +853,6 @@ function AdminPanel({ users, me }) {
       </button>;
     })}
     {!filteredChats.length && <small>{q ? 'खोज से कोई चैट नहीं मिली।' : 'अभी कोई चैट रिकॉर्ड नहीं हुई है।'}</small>}
-    {selectedChat && <div className="monitor"><b>चयनित चैट</b>{logs.length ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? 'आप' : users.find(u => u.uid === m.senderId)?.name || 'उपयोगकर्ता'}</b>: {m.text}</div>) : <small>इस चैट में अभी कोई संदेश नहीं है।</small>}</div>}
   </div>;
 }
 
