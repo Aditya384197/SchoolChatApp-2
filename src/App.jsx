@@ -22,6 +22,8 @@ import { usePrefs } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus } from './lib/status';
 import { uploadStatusMedia } from './lib/media';
+import { useBackHandler } from './lib/backStack';
+import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 
 function formatLastSeen(ts) {
   if (!ts) return 'अंतिम बार उपलब्ध नहीं';
@@ -226,6 +228,7 @@ function MessageBubble({ me, message, onSeen, onLongPress }) {
 }
 
 function MessageActionSheet({ message, me, chatId, onClose }) {
+  useBackHandler(onClose);
   const mine = message.senderId === me.uid;
   const withinWindow = mine && message.createdAt && (Date.now() - message.createdAt < DELETE_WINDOW_MS);
   const [copied, setCopied] = useState(false);
@@ -264,6 +267,7 @@ function MessageActionSheet({ message, me, chatId, onClose }) {
 }
 
 function Chat({ me, user, onBack }) {
+  useBackHandler(onBack);
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
   const [hidden, setHidden] = useState({});
@@ -355,7 +359,7 @@ function Chat({ me, user, onBack }) {
       </div>
       <form className="composer" onSubmit={submit}>
         <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder="संदेश लिखें…" />
-        <button className="send" disabled={sending}><Send size={20} /></button>
+        <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
       {actionMsg && <MessageActionSheet message={actionMsg} me={me} chatId={chatId} onClose={() => setActionMsg(null)} />}
     </div>
@@ -371,6 +375,7 @@ function AppShell({ me, profile }) {
   const [previews, setPreviews] = useState({});
   const [notificationsReady, setNotificationsReady] = useState(false);
   const [view, setView] = useState('chats'); // 'chats' | 'admin' — admin gets its own tab, not just a settings sub-panel
+  useBackHandler(view === 'admin' ? () => setView('chats') : null);
   const [statusUids, setStatusUids] = useState(new Set());
   const [statusOwner, setStatusOwner] = useState(null); // whose status is being viewed
   const [composing, setComposing] = useState(false);
@@ -511,6 +516,7 @@ function AppShell({ me, profile }) {
 }
 
 function StatusComposer({ me, onClose }) {
+  useBackHandler(onClose);
   const [tab, setTab] = useState('text');
   const [text, setText] = useState('');
   const [bg, setBg] = useState('#0f6fe8');
@@ -631,6 +637,13 @@ function ProfileEditPanel({ me, profile, onClose }) {
 function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin }) {
   const { t, lang, setLang, theme, setTheme } = usePrefs();
   const [panel, setPanel] = useState('main');
+  const panelRef = useRef(panel);
+  useEffect(() => { panelRef.current = panel; }, [panel]);
+  const backHandler = useRef(() => {
+    if (panelRef.current !== 'main') setPanel('main');
+    else onClose();
+  }).current;
+  useBackHandler(backHandler);
 
   if (panel === 'editProfile') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
     <div className="drawer-head"><b>प्रोफ़ाइल एडिट करें</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
@@ -695,6 +708,8 @@ function AdminPanel({ users, me }) {
   const [query, setQuery] = useState('');
   const [removing, setRemoving] = useState(null);
   const [, forceTick] = useState(0);
+
+  useBackHandler(removing ? () => setRemoving(null) : (selectedChat ? () => setSelectedChat(null) : null));
 
   useEffect(() => onValue(ref(db, 'adminMirror'), s => setMirrors(s.val() || {})), []);
   useEffect(() => {
@@ -777,39 +792,75 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [bannedMsg, setBannedMsg] = useState('');
+  const [exitToast, setExitToast] = useState(false);
 
   useEffect(() => {
-    if (!auth) { setLoading(false); return undefined; }
-    return onAuthStateChanged(auth, async user => {
-      if (user && await isBanned(user.uid)) {
-        await logout().catch(() => {});
-        setBannedMsg('आपकी एक्सेस हटा दी गई है।');
-        setMe(null); setProfile(null); setLoading(false);
-        return;
-      }
-      setMe(user);
-      if (user) {
-        onValue(ref(db, `users/${user.uid}`), s => setProfile(s.val()));
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
+    initNativeBack();
+    setExitWarningHandler(() => {
+      setExitToast(true);
+      setTimeout(() => setExitToast(false), 2000);
     });
   }, []);
 
+  useEffect(() => {
+    if (!auth) { setLoading(false); return undefined; }
+    let unsub;
+    let cancelled = false;
+    // Wait for Firebase Auth to finish restoring any persisted session
+    // before attaching the listener or rendering anything auth-dependent.
+    // Skipping this caused a real bug: on some cold resumes the very first
+    // onAuthStateChanged callback could fire with user=null for an instant
+    // (before the persisted session had actually loaded from storage),
+    // which briefly flashed the login screen even though the person was
+    // already logged in, right before the real callback corrected it.
+    // authStateReady() resolves only once that initial state is settled, so
+    // by the time we attach the listener there's nothing left to flicker.
+    auth.authStateReady().then(() => {
+      if (cancelled) return;
+      unsub = onAuthStateChanged(auth, async user => {
+        if (user && await isBanned(user.uid)) {
+          await logout().catch(() => {});
+          setBannedMsg('आपकी एक्सेस हटा दी गई है।');
+          setMe(null); setProfile(null); setLoading(false);
+          return;
+        }
+        setMe(user);
+        if (user) {
+          onValue(ref(db, `users/${user.uid}`), s => setProfile(s.val()));
+        } else {
+          setProfile(null);
+        }
+        setLoading(false);
+      });
+    });
+    return () => { cancelled = true; unsub && unsub(); };
+  }, []);
+
+  let content;
   if (firebaseInitError) {
-    return (
+    content = (
       <div className="splash config-error">
         <img src="/school-chat-icon.png" alt="School Chat" />
         <span>Setup अधूरा है</span>
         <p>{firebaseInitError}</p>
       </div>
     );
+  } else if (loading) {
+    content = <div className="splash"><img src="/school-chat-icon.png" alt="School Chat" /><span>School Chat</span></div>;
+  } else if (!me) {
+    content = <AuthScreen bannedMsg={bannedMsg} />;
+  } else if (!profile) {
+    content = <CompleteProfileScreen me={me} />;
+  } else {
+    content = <LockGate><AppShell me={me} profile={profile} /></LockGate>;
   }
-  if (loading) return <div className="splash"><img src="/school-chat-icon.png" alt="School Chat" /><span>School Chat</span></div>;
-  if (!me) return <AuthScreen bannedMsg={bannedMsg} />;
-  if (!profile) return <CompleteProfileScreen me={me} />;
-  return <LockGate><AppShell me={me} profile={profile} /></LockGate>;
+
+  return (
+    <>
+      {content}
+      {exitToast && <div className="toast-exit">फिर से दबाएं, ऐप से बाहर जाने के लिए</div>}
+    </>
+  );
 }
 
 function LockGate({ children }) {

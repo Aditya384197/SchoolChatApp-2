@@ -24,6 +24,10 @@ React + Firebase Realtime Database + Capacitor Android.
 - Admin के लिए सभी रिकॉर्ड की गई chats — रजिस्ट्रेशन स्क्रीन और Settings दोनों जगह साफ़ बताया गया है
 - Mobile-friendly UI, GitHub Actions से APK build
 
+## APK इंस्टॉल करने में दिक्कत आए तो
+- पहली बार इंस्टॉल करने पर फ़ोन "Unknown apps"/Play Protect की चेतावनी दिखा सकता है — "Install anyway" चुनना होगा (यह Android का सामान्य व्यवहार है, APK में कोई गड़बड़ी नहीं)।
+- **अगर पहले से पुराना वर्ज़न इंस्टॉल है और नया इंस्टॉल नहीं हो रहा** — अब हर बिल्ड एक ही (cached) debug keystore से sign होता है, तो नया वर्ज़न पुराने के ऊपर अपडेट के रूप में इंस्टॉल हो जाना चाहिए। अगर फिर भी दिक्कत आए, पुराना ऐप पहले uninstall करके फिर नया इंस्टॉल करें।
+
 ## ज़रूरी सूचना
 
 Realtime Database client से सीधे लिखे गए admin mirror को पूर्ण tamper-proof audit log नहीं माना जा सकता। बंद ऐप में वास्तविक push notification के लिए Firebase Cloud Messaging + trusted backend/Cloud Functions चाहिए। सदस्य हटाने पर उनका Firebase Auth क्रेडेंशियल खुद नहीं मिटता, सिर्फ़ एक्सेस स्थायी रूप से बंद होता है — विस्तार से `FIREBASE_SETUP.md` #7 में।

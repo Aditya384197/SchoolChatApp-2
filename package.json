@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@capacitor/android": "^7.4.3",
+    "@capacitor/app": "^7.0.2",
     "@capacitor/core": "^7.4.3",
     "firebase": "^12.2.1",
     "lucide-react": "^0.468.0",

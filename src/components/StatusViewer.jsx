@@ -5,11 +5,13 @@ import {
   commentOnStatus, listenStatusComments, listenStatusViewCount
 } from '../lib/status';
 import { Avatar } from './Profile';
+import { useBackHandler } from '../lib/backStack';
 
 const REACT_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const SLIDE_MS = 5000;
 
 export function StatusViewer({ owner, me, onClose }) {
+  useBackHandler(onClose);
   const [items, setItems] = useState([]);
   const [index, setIndex] = useState(0);
   const [progress, setProgress] = useState(0);
