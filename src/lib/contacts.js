@@ -1,4 +1,7 @@
 import { Capacitor } from '@capacitor/core';
+import { get, ref } from 'firebase/database';
+import { db } from '../firebase';
+import { addKnownContact } from './directory';
 
 // The old implementation used the browser's Contact Picker API
 // (navigator.contacts), which does not exist inside a Capacitor Android
@@ -20,28 +23,31 @@ export async function getPhoneContacts() {
   }
 }
 
-function normalizePhone(raw) {
+export function normalizePhone(raw) {
   if (!raw) return '';
   const digits = String(raw).replace(/\D/g, '');
   return digits.slice(-10); // compare last 10 digits, so country-code/leading-0 formatting differences don't matter
 }
 
-// Matches the device's contact phone numbers against the given users' phone
-// field. Returns a Set of matching user uids. Never shown anywhere in the
-// UI by itself -- used only to quietly prioritise people you actually know
-// (see AppShell's contact sort).
-export async function matchContactUids(users) {
+// Privacy model: a normal user can't read the full user directory anymore
+// (see database.rules.json), so matching can't scan a bulk users list --
+// instead each device contact's phone number is looked up individually
+// against phoneIndex/{number} -> uid (an exact-match index written at
+// registration). Any match found is written into the current user's own
+// knownContacts, which is what actually makes that person visible in the
+// main list going forward. Nothing about this is shown anywhere -- it just
+// runs quietly in the background.
+export async function matchAndSaveContacts(myUid) {
   const contacts = await getPhoneContacts();
-  if (!contacts.length) return new Set();
-  const deviceNumbers = new Set();
+  if (!contacts.length) return;
+  const numbers = new Set();
   contacts.forEach(c => (c.tel || []).forEach(t => {
     const n = normalizePhone(t);
-    if (n) deviceNumbers.add(n);
+    if (n) numbers.add(n);
   }));
-  const matched = new Set();
-  users.forEach(u => {
-    const n = normalizePhone(u.phone);
-    if (n && deviceNumbers.has(n)) matched.add(u.uid);
-  });
-  return matched;
+  await Promise.all([...numbers].map(async n => {
+    const snap = await get(ref(db, `phoneIndex/${n}`)).catch(() => null);
+    const uid = snap?.val();
+    if (uid && uid !== myUid) await addKnownContact(myUid, uid).catch(() => {});
+  }));
 }

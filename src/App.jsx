@@ -13,7 +13,8 @@ import {
   chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage,
   deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS
 } from './lib/chat';
-import { getPhoneContacts, matchContactUids } from './lib/contacts';
+import { getPhoneContacts, matchAndSaveContacts } from './lib/contacts';
+import { listenKnownContacts, addKnownContact, findByCode } from './lib/directory';
 import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification } from './lib/notifications';
@@ -337,15 +338,18 @@ function Chat({ me, user, onBack }) {
     setText('');
     clearTimeout(typingTimer.current);
     typingActive.current = false;
-    await setTyping(chatId, me.uid, false).catch(() => {});
-    try {
-      await sendMessage(chatId, me.uid, user.uid, value);
-    } finally {
-      setSending(false);
-      // Keep the keyboard open for the next message instead of it dropping
-      // away after every send.
-      inputRef.current?.focus();
-    }
+    setTyping(chatId, me.uid, false).catch(() => {});
+    // Realtime Database queues writes locally and resolves this promise
+    // only once it reaches the server -- while offline that can hang for a
+    // long time. The local cache (and this chat's own message listener)
+    // already reflects the message immediately regardless, so don't block
+    // the composer on the network round-trip; it'll sync in the background
+    // once connectivity returns.
+    sendMessage(chatId, me.uid, user.uid, value).catch(() => {});
+    setSending(false);
+    // Keep the keyboard open for the next message instead of it dropping
+    // away after every send.
+    inputRef.current?.focus();
   }
 
   const visibleMessages = messages.filter(m => !hidden[m.id]);
@@ -446,6 +450,8 @@ function Chat({ me, user, onBack }) {
 function AppShell({ me, profile }) {
   const { t, lang } = usePrefs();
   const [users, setUsers] = useState([]);
+  const [knownContacts, setKnownContacts] = useState({});
+  const [adminUid, setAdminUid] = useState(null);
   const [query, setQuery] = useState('');
   const [chatUser, setChatUser] = useState(null);
   const [settings, setSettings] = useState(false);
@@ -457,21 +463,51 @@ function AppShell({ me, profile }) {
   const [statusUids, setStatusUids] = useState(new Set());
   const [statusOwner, setStatusOwner] = useState(null); // whose status is being viewed
   const [composing, setComposing] = useState(false);
-  const [matchedUids, setMatchedUids] = useState(new Set());
 
-  useEffect(() => onValue(ref(db, 'users'), s => {
-    const all = s.val() || {};
-    setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid));
-  }), [me.uid]);
+  // Privacy: a normal user can no longer read the whole /users directory
+  // (see database.rules.json) -- only their own "known contacts" (people a
+  // phone-contact match or a Find-by-ID search has already introduced) plus
+  // the admin (always reachable, for Direct Chat to Admin) are visible.
+  // Admin themselves is exempt from all of this (handled separately below).
+  useEffect(() => listenKnownContacts(me.uid, setKnownContacts), [me.uid]);
+  useEffect(() => onValue(ref(db, 'config/adminUid'), s => setAdminUid(s.val())), []);
 
-  // Match phone contacts once we actually have a user list to match against.
-  // Quiet by design -- no UI announces this; it just gently prioritises
-  // people you actually know when sorting the list below.
+  const visibleUids = useMemo(() => {
+    const s = new Set(Object.keys(knownContacts));
+    if (adminUid) s.add(adminUid);
+    s.delete(me.uid);
+    return [...s];
+  }, [knownContacts, adminUid, me.uid]);
+
   useEffect(() => {
-    if (!users.length) return;
-    matchContactUids(users).then(setMatchedUids).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [users.length]);
+    if (profile.role === 'admin') return undefined; // admin uses its own full-list read, below
+    const stops = visibleUids.map(uid => onValue(ref(db, `users/${uid}`), s => {
+      const val = s.val();
+      setUsers(prev => {
+        const rest = prev.filter(u => u.uid !== uid);
+        return val ? [...rest, { uid, ...val }] : rest;
+      });
+    }));
+    return () => stops.forEach(stop => stop && stop());
+  }, [visibleUids, profile.role]);
+
+  // Admin keeps seeing literally everyone -- that's the whole point of the
+  // disclosed monitoring model, and the rules grant admin unrestricted read
+  // of /users specifically for this.
+  useEffect(() => {
+    if (profile.role !== 'admin') return undefined;
+    return onValue(ref(db, 'users'), s => {
+      const all = s.val() || {};
+      setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid));
+    });
+  }, [me.uid, profile.role]);
+
+  // Quiet, background match: phone contacts -> registered numbers -> saved
+  // into this user's own knownContacts (see lib/contacts.js), which is what
+  // actually makes someone show up above. Runs once per session.
+  useEffect(() => {
+    matchAndSaveContacts(me.uid).catch(() => {});
+  }, [me.uid]);
 
   useEffect(() => onValue(ref(db, `users/${me.uid}/unread`), s => setUnread(s.val() || {})), [me.uid]);
   useEffect(() => {
@@ -523,11 +559,9 @@ function AppShell({ me, profile }) {
       const pa = previews[chatIdFor(me.uid, a.uid)]?.at || 0;
       const pb = previews[chatIdFor(me.uid, b.uid)]?.at || 0;
       if (pa !== pb) return pb - pa;
-      return Number(b.online) - Number(a.online)
-        || Number(matchedUids.has(b.uid)) - Number(matchedUids.has(a.uid))
-        || (a.name || '').localeCompare(b.name || '');
+      return Number(b.online) - Number(a.online) || (a.name || '').localeCompare(b.name || '');
     }),
-  [users, query, previews, me.uid, matchedUids]);
+  [users, query, previews, me.uid]);
 
   const totalUnread = Object.values(unread).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const adminUser = users.find(u => u.role === 'admin');
@@ -711,10 +745,51 @@ function ProfileEditPanel({ me, profile, onClose }) {
       <label>{t('name')}<input value={name} onChange={e => setName(e.target.value)} /></label>
       <label>{t('phone')}<input value={phone} onChange={e => setPhone(e.target.value)} /></label>
       <label>{t('email')} <span className="optional">({t('emailLoginIdHint')})</span><input value={profile.email} readOnly /></label>
+      {profile.userCode && (
+        <label>{t('yourId')}
+          <div className="id-row">
+            <input value={profile.userCode} readOnly />
+            <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(profile.userCode)}>{t('copy')}</button>
+          </div>
+        </label>
+      )}
+      {profile.userCode && <p className="muted small">{t('shareIdHint')}</p>}
       <div className="step-actions">
         <button className="secondary" onClick={onClose}>{t('back')}</button>
         <button className="primary" onClick={save} disabled={saving}>{saving ? t('saving') : t('save')}</button>
       </div>
+    </div>
+  );
+}
+
+function FindByIdPanel({ me, onFound }) {
+  const { t } = usePrefs();
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function search(e) {
+    e.preventDefault();
+    setError(''); setBusy(true);
+    try {
+      const found = await findByCode(code);
+      if (!found || found.uid === me.uid) { setError(t('notFound')); return; }
+      await addKnownContact(me.uid, found.uid);
+      onFound(found);
+    } catch {
+      setError(t('notFound'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="settings-panel">
+      <form onSubmit={search}>
+        <label>{t('findById')}<input value={code} onChange={e => setCode(e.target.value)} placeholder={t('enterFriendId')} autoCapitalize="characters" /></label>
+        {error && <div className="error">{error}</div>}
+        <button className="primary" disabled={busy || !code.trim()}>{busy ? t('pleaseWait') : t('find')}</button>
+      </form>
     </div>
   );
 }
@@ -729,6 +804,11 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     else onClose();
   }).current;
   useBackHandler(backHandler);
+
+  if (panel === 'findById') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+    <PanelHeader title={t('findById')} onBack={() => setPanel('main')} />
+    <FindByIdPanel me={me} onFound={(user) => { onOpenChat(user); onClose(); }} />
+  </aside></div>;
 
   if (panel === 'editProfile') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
     <PanelHeader title={t('editProfile')} onBack={() => setPanel('main')} />
@@ -781,6 +861,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
         <PanelHeader title={t('settings')} onBack={onClose} />
         <p className="disclosure small">{t('disclosure')}</p>
         <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
+        <button className="setting-row" onClick={() => setPanel('findById')}><Search /> {t('findById')} <span className="row-end">›</span></button>
         <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
         {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
         <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
@@ -900,6 +981,7 @@ export default function App() {
   const { t } = usePrefs();
   const [me, setMe] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bannedMsg, setBannedMsg] = useState('');
   const [exitToast, setExitToast] = useState(false);
@@ -915,35 +997,42 @@ export default function App() {
   useEffect(() => {
     if (!auth) { setLoading(false); return undefined; }
     let unsub;
-    let cancelled = false;
+    let settled = false;
     // Wait for Firebase Auth to finish restoring any persisted session
-    // before attaching the listener or rendering anything auth-dependent.
-    // Skipping this caused a real bug: on some cold resumes the very first
-    // onAuthStateChanged callback could fire with user=null for an instant
-    // (before the persisted session had actually loaded from storage),
-    // which briefly flashed the login screen even though the person was
-    // already logged in, right before the real callback corrected it.
-    // authStateReady() resolves only once that initial state is settled, so
-    // by the time we attach the listener there's nothing left to flicker.
-    auth.authStateReady().then(() => {
-      if (cancelled) return;
+    // before rendering anything auth-dependent -- but only for a bounded
+    // time. A previous version awaited authStateReady() with no timeout,
+    // which is normally fast but could hang the splash screen indefinitely
+    // if restoration was ever slow (poor network while it tries to refresh
+    // the token). This caps the wait and falls back to attaching the
+    // listener directly if it takes too long, so the app never appears
+    // stuck open indefinitely.
+    const likelyLoggedIn = localStorage.getItem('schoolChatVerified') === '1';
+    const readyTimeout = setTimeout(attach, likelyLoggedIn ? 2000 : 200);
+
+    function attach() {
+      if (settled) return;
+      settled = true;
       unsub = onAuthStateChanged(auth, async user => {
         if (user && await isBanned(user.uid)) {
           await logout().catch(() => {});
           setBannedMsg(t('bannedMessage'));
-          setMe(null); setProfile(null); setLoading(false);
+          setMe(null); setProfile(null); setProfileLoaded(true); setLoading(false);
           return;
         }
         setMe(user);
         if (user) {
-          onValue(ref(db, `users/${user.uid}`), s => setProfile(s.val()));
+          setProfileLoaded(false);
+          onValue(ref(db, `users/${user.uid}`), s => { setProfile(s.val()); setProfileLoaded(true); });
         } else {
           setProfile(null);
+          setProfileLoaded(true);
         }
         setLoading(false);
       });
-    });
-    return () => { cancelled = true; unsub && unsub(); };
+    }
+
+    auth.authStateReady().then(() => { clearTimeout(readyTimeout); attach(); });
+    return () => { clearTimeout(readyTimeout); unsub && unsub(); };
   }, []);
 
   let content;
@@ -959,6 +1048,13 @@ export default function App() {
     content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span></div>;
   } else if (!me) {
     content = <AuthScreen bannedMsg={bannedMsg} />;
+  } else if (!profileLoaded) {
+    // We know who's signed in but haven't heard back from the database yet
+    // -- keep showing the splash rather than guessing "no profile" and
+    // flashing the phone-number step of registration at an already fully
+    // registered person (that flash was the "asking for a number, then
+    // auto-continuing" glitch).
+    content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span></div>;
   } else if (!profile) {
     content = <CompleteProfileScreen me={me} />;
   } else {

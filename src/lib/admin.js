@@ -11,12 +11,21 @@ import { db } from '../firebase';
 // send anything. Functionally they're removed; their old email/password
 // itself just can't be deleted from here.
 export async function removeUser(uid) {
-  const chatsSnap = await get(ref(db, 'chats'));
+  const [userSnap, chatsSnap] = await Promise.all([
+    get(ref(db, `users/${uid}`)),
+    get(ref(db, 'chats')),
+  ]);
+  const user = userSnap.val() || {};
   const chats = chatsSnap.val() || {};
   const writes = {
     [`users/${uid}`]: null,
     [`config/banned/${uid}`]: true,
   };
+  if (user.userCode) writes[`userCodeIndex/${user.userCode}`] = null;
+  if (user.phone) {
+    const digits = String(user.phone).replace(/\D/g, '').slice(-10);
+    if (digits) writes[`phoneIndex/${digits}`] = null;
+  }
   Object.entries(chats).forEach(([chatId, chat]) => {
     if (chat?.participants?.[uid]) {
       writes[`chats/${chatId}`] = null;

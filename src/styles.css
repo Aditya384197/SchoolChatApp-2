@@ -189,14 +189,19 @@ input,textarea{user-select:text;-webkit-user-select:text}
 /* Smoother, more "premium" tap feedback everywhere -- replaces the abrupt
    flat-colour :active swaps with a gentle scale + fade, and gives every
    tappable row a proper transition instead of snapping instantly. */
-button,.user-row,.setting-row,.monitor-row,.panel-header .icon,.icon,.avatar-shell,.status-avatar-btn,.avatar-wrap{
-  transition:transform .12s cubic-bezier(.2,.8,.2,1),background-color .18s ease,box-shadow .18s ease,opacity .18s ease;
-  -webkit-tap-highlight-color:transparent
+*{-webkit-tap-highlight-color:transparent}
+button,.user-row,.setting-row,.monitor-row,.icon,.avatar-shell,.status-avatar-btn,.avatar-wrap{
+  transition:background-color .15s ease,opacity .15s ease;
+  touch-action:manipulation
 }
-button:active:not(:disabled),.user-row:active,.setting-row:active,.monitor-row:active,.icon:active,.avatar-shell:active,.status-avatar-btn:active{
-  transform:scale(.96);
-  opacity:.85
-}
-.user-row:active,.setting-row:active{box-shadow:0 1px 4px #0f172a0a}
-.setting-row:active{background:#f8fafc}
-.primary:active:not(:disabled),.send:active:not(:disabled){transform:scale(.95);box-shadow:0 2px 8px #0f6fe855}
+/* Pure opacity/background feedback only -- no transform/scale. A transform
+   creates a new GPU compositing layer, and in this WebView that was making
+   an unrelated sibling (e.g. the back arrow next to whichever row was
+   actually tapped) visually flash as if it were pressed too. Plain
+   background/opacity changes don't have that problem. */
+button:active:not(:disabled),.monitor-row:active,.icon:active,.avatar-shell:active,.status-avatar-btn:active{opacity:.8}
+.user-row:active,.setting-row:active{background:#f8fafc}
+.primary:active:not(:disabled),.send:active:not(:disabled){opacity:.85}
+.id-row{display:flex;gap:8px;align-items:center}
+.id-row input{flex:1;font-weight:800;letter-spacing:.5px}
+.id-row button{flex-shrink:0;padding:10px 14px}

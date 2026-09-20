@@ -21,9 +21,9 @@
       }
     },
     "users": {
-      ".read": "auth != null",
+      ".read": "auth != null && auth.uid === root.child('config').child('adminUid').val()",
       "$uid": {
-        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val() || $uid === root.child('config').child('adminUid').val() || root.child('users').child(auth.uid).child('knownContacts').child($uid).exists())",
         ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
         ".validate": "newData.hasChildren(['name','email','role']) && (auth.uid !== $uid || newData.child('role').val() === (auth.uid === root.child('config').child('adminUid').val() ? 'admin' : 'user'))",
         "unread": {
@@ -32,7 +32,26 @@
             ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())",
             ".validate": "newData.isNumber() && newData.val() >= 0"
           }
+        },
+        "knownContacts": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+          "$otherUid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.val() === true"
+          }
         }
+      }
+    },
+    "userCodeIndex": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid) || (!newData.exists() && auth.uid === root.child('config').child('adminUid').val()))"
+      }
+    },
+    "phoneIndex": {
+      "$phone": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((newData.exists() && newData.val() === auth.uid) || (!newData.exists() && (data.val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())))"
       }
     },
     "chats": {

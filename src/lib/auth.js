@@ -2,9 +2,10 @@ import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, updateProfile
 } from 'firebase/auth';
-import { ref, get, set, update, runTransaction } from 'firebase/database';
+import { ref, get, set, update, remove, runTransaction } from 'firebase/database';
 import { auth, db } from '../firebase';
 import { ADMIN_ACCESS_EMAIL } from '../adminAccess';
+import { normalizePhone } from './contacts';
 
 // --- Registration is split into two phases so sign-up can resume cleanly if
 // interrupted, while staying wired to real Firebase Authentication and the
@@ -35,12 +36,35 @@ export async function beginRegistration(email, password) {
   }
 }
 
+function randomUserCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I, easy to read aloud
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return 'SC-' + s;
+}
+
+// Claims a short, unique, shareable ID for this account (e.g. "SC-K3F9Q2")
+// so a friend can find you by typing it in, without the app exposing
+// everyone's profile to everyone by default. Retries on the rare collision.
+async function claimUserCode(uid) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = randomUserCode();
+    const result = await runTransaction(ref(db, `userCodeIndex/${code}`), current => {
+      if (current !== null) return; // taken — abort, caller retries with a new code
+      return uid;
+    });
+    if (result.committed && result.snapshot.val() === uid) return code;
+  }
+  throw new Error('यूज़र आईडी नहीं बन पाई, फिर कोशिश करें।');
+}
+
 // Phase 2: write the actual profile (name/phone/avatar/photo) once collected.
 // Role is recomputed fresh from config/adminUid here rather than trusted
 // from phase 1, so this also correctly resumes an interrupted sign-up.
 export async function completeRegistration({ uid, email, name, phone, avatar, photoUrl }) {
   const adminUidSnap = await get(ref(db, 'config/adminUid'));
   const role = adminUidSnap.val() === uid ? 'admin' : 'user';
+  const userCode = await claimUserCode(uid);
 
   if (auth.currentUser) await updateProfile(auth.currentUser, { displayName: name.trim() });
   await set(ref(db, `users/${uid}`), {
@@ -50,10 +74,13 @@ export async function completeRegistration({ uid, email, name, phone, avatar, ph
     avatar: avatar || '🧑‍🎓',
     photoUrl: photoUrl || '',
     role,
+    userCode,
     createdAt: Date.now(),
     lastSeen: Date.now(),
     online: true
   });
+  const n = normalizePhone(phone);
+  if (n) await set(ref(db, `phoneIndex/${n}`), uid).catch(() => {});
   localStorage.setItem('schoolChatVerified', '1');
   return role;
 }
@@ -74,6 +101,13 @@ export async function updateOwnProfile(uid, { name, phone, avatar, photoUrl }) {
   if (avatar !== undefined) patch.avatar = avatar;
   if (photoUrl !== undefined) patch.photoUrl = photoUrl;
   if (name !== undefined && auth.currentUser) await updateProfile(auth.currentUser, { displayName: name.trim() });
+  if (phone !== undefined) {
+    const oldSnap = await get(ref(db, `users/${uid}/phone`));
+    const oldN = normalizePhone(oldSnap.val());
+    const newN = normalizePhone(phone);
+    if (oldN && oldN !== newN) await remove(ref(db, `phoneIndex/${oldN}`)).catch(() => {});
+    if (newN) await set(ref(db, `phoneIndex/${newN}`), uid).catch(() => {});
+  }
   await update(ref(db, `users/${uid}`), patch);
 }
 
