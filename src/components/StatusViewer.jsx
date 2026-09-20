@@ -1,16 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Send } from 'lucide-react';
+import { ArrowLeft, Send } from 'lucide-react';
 import {
   listenStatus, markStatusViewed, reactToStatus, listenStatusReactions,
   commentOnStatus, listenStatusComments, listenStatusViewCount
 } from '../lib/status';
 import { Avatar } from './Profile';
 import { useBackHandler } from '../lib/backStack';
+import { usePrefs } from '../context/Prefs';
 
 const REACT_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '🔥'];
 const SLIDE_MS = 5000;
 
 export function StatusViewer({ owner, me, onClose }) {
+  const { t } = usePrefs();
   useBackHandler(onClose);
   const [items, setItems] = useState([]);
   const [index, setIndex] = useState(0);
@@ -61,8 +63,8 @@ export function StatusViewer({ owner, me, onClose }) {
   if (!current) {
     return (
       <div className="status-viewer">
-        <div className="status-top"><button className="icon" onClick={onClose}><X color="#fff" /></button></div>
-        <div className="status-empty"><Avatar user={owner} size="lg" /><p>{isOwn ? 'आपका कोई स्टेटस नहीं है' : 'कोई स्टेटस उपलब्ध नहीं'}</p></div>
+        <div className="status-top"><button className="icon" onClick={onClose}><ArrowLeft color="#fff" /></button></div>
+        <div className="status-empty"><Avatar user={owner} size="lg" /><p>{isOwn ? t('noStatusOwn') : t('noStatusOther')}</p></div>
       </div>
     );
   }
@@ -82,10 +84,10 @@ export function StatusViewer({ owner, me, onClose }) {
         {items.map((it, i) => <div key={it.id} className="status-bar"><span style={{ width: i < index ? '100%' : i === index ? `${progress}%` : '0%' }} /></div>)}
       </div>
       <div className="status-top" onClick={e => e.stopPropagation()}>
+        <button className="icon" onClick={onClose}><ArrowLeft color="#fff" /></button>
         <Avatar user={owner} size="sm" />
         <b className="grow">{owner.name}</b>
-        {isOwn && <small className="status-views">{viewCount} देखा</small>}
-        <button className="icon" onClick={onClose}><X color="#fff" /></button>
+        {isOwn && <small className="status-views">{viewCount} {t('viewedSuffix')}</small>}
       </div>
       <div className="status-slide">
         {current.type === 'image' && <img src={current.content} alt="" />}
@@ -104,7 +106,7 @@ export function StatusViewer({ owner, me, onClose }) {
             ))}
           </div>
           <form onSubmit={sendComment} className="status-comment-form">
-            <input value={comment} onChange={e => setComment(e.target.value)} placeholder="कमेंट लिखें…" />
+            <input value={comment} onChange={e => setComment(e.target.value)} placeholder={t('writeComment')} />
             <button type="submit"><Send size={16} /></button>
           </form>
         </div>

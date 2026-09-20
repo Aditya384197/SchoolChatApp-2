@@ -1,20 +1,19 @@
-// Deliberately covers the main user-facing surfaces (auth, settings, chat
-// list, chat screen, logout) rather than every single string in the app
-// (e.g. the admin monitoring internals stay Hindi-only for now) -- kept
-// small on purpose so it's easy to extend later.
+// Covers essentially every static UI label across the app. Chat message
+// content, people's names, and raw Firebase error text are never
+// translated (that's real content/data, not interface copy).
 export const translations = {
   hi: {
     appName: 'School Chat', tagline: 'अपने समूह से जुड़े रहें',
     disclosure: 'यह ऐप एडमिन-मॉनिटर्ड है: इस ऐप में होने वाली सभी चैट — आपकी एडमिन से बातचीत और आपस में दो दोस्तों की चैट भी — एडमिन को दिखती हैं। खाता बनाकर आप इससे सहमत हैं।',
     email: 'ईमेल', password: 'पासवर्ड', phone: 'मोबाइल नंबर', optional: 'वैकल्पिक',
-    name: 'वास्तविक नाम', continueBtn: 'आगे बढ़ें', pleaseWait: 'कृपया प्रतीक्षा करें…',
+    name: 'वास्तविक नाम', nameRequired: 'अपना वास्तविक नाम भरें।', continueBtn: 'आगे बढ़ें', pleaseWait: 'कृपया प्रतीक्षा करें…',
     back: 'वापस', start: 'शुरू करें', saving: 'सेव हो रहा है…',
     login: 'प्रवेश करें', newAccount: 'नया खाता बनाएँ', haveAccount: 'पहले से खाता है? प्रवेश करें',
     noAccount: 'पहले से खाता नहीं है? नया खाता बनाएँ',
     phoneHint: 'दोस्तों के फ़ोन कॉन्टैक्ट से आपको जल्दी ढूंढने में मदद करता है — चाहें तो छोड़ सकते हैं।',
     buildProfile: 'अपनी प्रोफ़ाइल बनाएं', addPhoto: 'फ़ोटो जोड़ें', removePhoto: 'हटाएं',
     chooseAvatar: 'या एक अवतार चुनें', searchPlaceholder: 'नाम, ईमेल या नंबर खोजें',
-    yourContacts: 'आपके संपर्क', online: 'ऑनलाइन', settings: 'सेटिंग',
+    yourContacts: 'आपके संपर्क', online: 'ऑनलाइन', offline: 'ऑफलाइन', settings: 'सेटिंग',
     directChatAdmin: 'Direct Chat to Admin', matchContacts: 'फोन संपर्क मिलाएँ',
     notifications: 'सूचनाएँ', unreadMessages: 'अनपढ़ संदेश', language: 'भाषा',
     theme: 'थीम', appLock: 'ऐप लॉक', logout: 'बाहर निकलें',
@@ -24,19 +23,48 @@ export const translations = {
     deletedMessage: 'यह मैसेज हटा दिया गया', cancelDelete: 'रद्द करें',
     themeLight: 'लाइट', themeDark: 'डार्क', themeSystem: 'सिस्टम डिफ़ॉल्ट',
     langHindi: 'हिंदी', langEnglish: 'English',
+    noUsersFound: 'कोई उपयोगकर्ता नहीं मिला।', youPrefix: 'आप: ',
+    // Settings
+    profile: 'प्रोफ़ाइल', status: 'स्टेटस', statusSet: 'लगा हुआ है', statusAdd: 'लगाएं',
+    update: 'अपडेट', currentVersion: 'वर्तमान वर्ज़न', updateHint: 'नया वर्ज़न इंस्टॉल करने पर यह अपने-आप पुराने की जगह ले लेगा (uninstall करने की ज़रूरत नहीं) — जब तक दोनों एक ही जगह से बने हों।',
+    checkUpdate: 'नया वर्ज़न देखें', on: 'चालू', off: 'बंद', adjustPhoto: 'फ़ोटो एडजस्ट करें',
+    adminDashboardOpen: 'Admin Dashboard खोलें', chatsTab: 'चैट', adminTab: 'एडमिन', bannedMessage: 'आपकी एक्सेस हटा दी गई है।', setupIncomplete: 'Setup अधूरा है', pressAgainExit: 'फिर से दबाएं, ऐप से बाहर जाने के लिए',
+    // Profile edit
+    editProfile: 'प्रोफ़ाइल एडिट करें', save: 'सेव करें', emailLoginIdHint: 'लॉगिन आईडी, बदला नहीं जा सकता',
+    // Chat / messages
+    online2: 'ऑनलाइन', selectedCount: 'चुने गए', selectAll: 'सभी चुनें', copy: 'कॉपी करें',
+    copied: 'कॉपी हो गया', share: 'शेयर करें', delete: 'हटाएं', confirmDelete: 'रद्द करें',
+    // Status
+    statusComposerTitle: 'स्टेटस लगाएं', textTab: 'टेक्स्ट', photoTab: 'फ़ोटो', videoTab: 'वीडियो',
+    writeSomething: 'कुछ लिखें…', writeSomethingError: 'कुछ लिखें।', choosePhotoError: 'एक फ़ोटो चुनें।', chooseVideoError: 'एक वीडियो चुनें।', statusPostFailed: 'स्टेटस पोस्ट नहीं हो सका।', choosePhoto: 'फ़ोटो चुनें', chooseVideo: 'वीडियो चुनें (अधिकतम 15MB)',
+    publish: 'स्टेटस पोस्ट करें', publishing: 'पोस्ट हो रहा है…', writeComment: 'कमेंट लिखें…',
+    viewedSuffix: 'देखा', noStatusOwn: 'आपका कोई स्टेटस नहीं है', noStatusOther: 'कोई स्टेटस उपलब्ध नहीं',
+    remove2: 'हटाएं',
+    // App lock
+    unlockPrompt: 'ऐप अनलॉक करने के लिए पिन डालें', enterOldPin: 'पहले पुराना पिन डालें',
+    enterNewPin: 'नया 4 अंकों का पिन डालें', reenterPin: 'पिन दोबारा डालें', wrongPin: 'गलत पिन',
+    pinMismatch: 'पिन मेल नहीं खाया, दोबारा कोशिश करें', removeAppLock: 'ऐप लॉक हटाएं',
+    // Admin
+    adminControls: 'एडमिन नियंत्रण', totalMembers: 'कुल सदस्य', onlineNowLabel: 'अभी ऑनलाइन',
+    totalChats: 'कुल चैट', activeNowLabel: 'अभी सक्रिय (3 मिनट में)', monitorSearchPlaceholder: 'नाम या नंबर से मॉनिटर करें…',
+    allMembers: 'सभी सदस्य', noMembersFound: 'कोई सदस्य नहीं मिला।', allRecordedChats: 'सभी रिकॉर्ड की गई चैट (मॉनिटरिंग)',
+    noChatsRecorded: 'अभी कोई चैट रिकॉर्ड नहीं हुई है।', noChatsFoundSearch: 'खोज से कोई चैट नहीं मिली।',
+    noMessagesYet: 'इस चैट में अभी कोई संदेश नहीं है।', noMessage: 'कोई संदेश नहीं', you: 'आप', user: 'उपयोगकर्ता',
+    removeConfirmPart1: 'को हटाएं? यह उनकी प्रोफ़ाइल और सभी चैट डेटाबेस से मिटा देगा, और वो अब लॉगिन नहीं कर पाएंगे — पर उनका ईमेल/पासवर्ड Firebase से पूरी तरह मिटाना client ऐप से संभव नहीं, सिर्फ़ एक्सेस बंद होगा।',
+    yesRemove: 'हाँ, हटाएं', activeRightNow: 'अभी सक्रिय',
   },
   en: {
     appName: 'School Chat', tagline: 'Stay connected with your group',
     disclosure: 'This app is admin-monitored: every chat here — your chat with the admin, and chats between any two friends — is visible to the admin. Creating an account means you agree.',
     email: 'Email', password: 'Password', phone: 'Mobile number', optional: 'optional',
-    name: 'Real name', continueBtn: 'Continue', pleaseWait: 'Please wait…',
+    name: 'Real name', nameRequired: 'Please enter your real name.', continueBtn: 'Continue', pleaseWait: 'Please wait…',
     back: 'Back', start: 'Get started', saving: 'Saving…',
     login: 'Log in', newAccount: 'Create new account', haveAccount: 'Already have an account? Log in',
     noAccount: "Don't have an account? Create one",
     phoneHint: 'Helps friends find you faster from their contacts — you can skip this.',
     buildProfile: 'Build your profile', addPhoto: 'Add photo', removePhoto: 'Remove',
     chooseAvatar: 'or pick an avatar', searchPlaceholder: 'Search name, email or number',
-    yourContacts: 'Your contacts', online: 'Online', settings: 'Settings',
+    yourContacts: 'Your contacts', online: 'online', offline: 'Offline', settings: 'Settings',
     directChatAdmin: 'Direct Chat to Admin', matchContacts: 'Match phone contacts',
     notifications: 'Notifications', unreadMessages: 'Unread messages', language: 'Language',
     theme: 'Theme', appLock: 'App lock', logout: 'Log out',
@@ -46,5 +74,28 @@ export const translations = {
     deletedMessage: 'This message was deleted', cancelDelete: 'Cancel',
     themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System default',
     langHindi: 'हिंदी', langEnglish: 'English',
+    noUsersFound: 'No users found.', youPrefix: 'You: ',
+    profile: 'Profile', status: 'Status', statusSet: 'Posted', statusAdd: 'Add',
+    update: 'Update', currentVersion: 'Current version', updateHint: 'Installing a new version replaces the old one automatically (no need to uninstall) — as long as both were built from the same place.',
+    checkUpdate: 'Check latest version', on: 'On', off: 'Off', adjustPhoto: 'Adjust photo',
+    adminDashboardOpen: 'Open Admin Dashboard', chatsTab: 'Chats', adminTab: 'Admin', bannedMessage: 'Your access has been removed.', setupIncomplete: 'Setup incomplete', pressAgainExit: 'Press back again to exit the app',
+    editProfile: 'Edit profile', save: 'Save', emailLoginIdHint: "your login ID, can't be changed",
+    online2: 'Online', selectedCount: 'selected', selectAll: 'Select all', copy: 'Copy',
+    copied: 'Copied', share: 'Share', delete: 'Delete', confirmDelete: 'Cancel',
+    statusComposerTitle: 'Add status', textTab: 'Text', photoTab: 'Photo', videoTab: 'Video',
+    writeSomething: 'Write something…', writeSomethingError: 'Please write something.', choosePhotoError: 'Please choose a photo.', chooseVideoError: 'Please choose a video.', statusPostFailed: 'Status could not be posted.', choosePhoto: 'Choose a photo', chooseVideo: 'Choose a video (max 15MB)',
+    publish: 'Post status', publishing: 'Posting…', writeComment: 'Write a comment…',
+    viewedSuffix: 'views', noStatusOwn: "You don't have a status yet", noStatusOther: 'No status available',
+    remove2: 'Remove',
+    unlockPrompt: 'Enter your PIN to unlock the app', enterOldPin: 'Enter your old PIN first',
+    enterNewPin: 'Enter a new 4-digit PIN', reenterPin: 'Re-enter your PIN', wrongPin: 'Wrong PIN',
+    pinMismatch: "PINs didn't match, try again", removeAppLock: 'Remove app lock',
+    adminControls: 'Admin controls', totalMembers: 'Total members', onlineNowLabel: 'Online now',
+    totalChats: 'Total chats', activeNowLabel: 'Active now (last 3 min)', monitorSearchPlaceholder: 'Search by name or number…',
+    allMembers: 'All members', noMembersFound: 'No members found.', allRecordedChats: 'All recorded chats (monitoring)',
+    noChatsRecorded: 'No chats recorded yet.', noChatsFoundSearch: 'No chats matched your search.',
+    noMessagesYet: 'No messages in this chat yet.', noMessage: 'No messages', you: 'You', user: 'User',
+    removeConfirmPart1: "? This will erase their profile and all chats from the database, and they won't be able to log in again — but their email/password itself can't be fully deleted from this client-only app, only their access is revoked.",
+    yesRemove: 'Yes, remove', activeRightNow: 'Active right now',
   }
 };

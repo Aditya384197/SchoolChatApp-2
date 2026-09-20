@@ -20,7 +20,8 @@ React + Firebase Realtime Database + Capacitor Android.
 - Private Chat to Admin, Logout (confirm स्क्रीन के साथ)
 - Status (टेक्स्ट/फ़ोटो/वीडियो, WhatsApp जैसा) — Settings से लगाएं/देखें (मेन पेज पर नहीं, वो क्लीन रहता है), 24 घंटे बाद अपने-आप गायब, इमोजी रिएक्शन + कमेंट, "किसने देखा" (सिर्फ़ मालिक/एडमिन को)
 - मैसेज पर टैप-होल्ड से multi-select मोड (WhatsApp जैसा) — एक-एक करके कई मैसेज चुनें, "सभी चुनें", फिर कॉपी/शेयर/डिलीट (मेरे लिए हमेशा, सबके लिए सिर्फ़ 5 मिनट के अंदर)। कहीं भी normal text-selection/copy-paste काम नहीं करता — सिर्फ़ Admin Dashboard के चैट-ट्रांसक्रिप्ट व्यू में और टेक्स्ट फ़ील्ड्स में।
-- Android foreground local notifications
+- Android foreground/backgrounded local notifications, असली परमिशन-रिक्वेस्ट के साथ
+- असली कॉन्टैक्ट मैचिंग (native plugin) — फ़ोन के contacts और ऐप में रजिस्टर्ड नंबरों को मिलाकर चुपचाप प्राथमिकता देता है, कहीं दिखाया नहीं जाता
 - Admin के लिए सभी रिकॉर्ड की गई chats — रजिस्ट्रेशन स्क्रीन और Settings दोनों जगह साफ़ बताया गया है
 - Mobile-friendly UI, GitHub Actions से APK build
 

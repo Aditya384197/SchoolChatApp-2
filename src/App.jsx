@@ -13,7 +13,7 @@ import {
   chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage,
   deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS
 } from './lib/chat';
-import { getPhoneContacts } from './lib/contacts';
+import { getPhoneContacts, matchContactUids } from './lib/contacts';
 import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification } from './lib/notifications';
@@ -27,13 +27,30 @@ import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 
-function formatLastSeen(ts) {
-  if (!ts) return 'अंतिम बार उपलब्ध नहीं';
+function formatLastSeen(ts, t, lang) {
+  const tr = t || ((k) => k);
+  const locale = lang === 'en' ? 'en-IN' : 'hi-IN';
+  const unavailable = lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
+  if (!ts) return unavailable;
   const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return 'अंतिम बार उपलब्ध नहीं';
+  if (Number.isNaN(date.getTime())) return unavailable;
   const diff = Date.now() - date.getTime();
-  if (diff < 60_000) return 'अभी-अभी ऑनलाइन था';
-  return `अंतिम बार ${date.toLocaleString('hi-IN', { dateStyle: 'short', timeStyle: 'short' })}`;
+  if (diff < 60_000) return tr('justOnline');
+  const prefix = lang === 'en' ? 'Last seen' : 'अंतिम बार';
+  return `${prefix} ${date.toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}`;
+}
+
+// Consistent header used by every settings sub-panel/full-screen: back
+// arrow always on the left, centred title, balanced empty space on the
+// right (never a cross/X for "go back one step").
+function PanelHeader({ title, onBack }) {
+  return (
+    <div className="panel-header">
+      <button className="icon" onClick={onBack}><ArrowLeft /></button>
+      <b className="panel-header-title">{title}</b>
+      <span className="panel-header-spacer" />
+    </div>
+  );
 }
 
 function StepDots({ step, total = 3 }) {
@@ -50,6 +67,7 @@ function StepDots({ step, total = 3 }) {
 // registration (after step 1 creates the account) and by someone resuming
 // an interrupted sign-up (account already exists, profile doesn't yet).
 function ProfileSteps({ identity, onDone }) {
+  const { t } = usePrefs();
   const [step, setStep] = useState(2);
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
@@ -60,7 +78,7 @@ function ProfileSteps({ identity, onDone }) {
 
   async function finish(e) {
     e.preventDefault();
-    if (!name.trim()) { setError('अपना वास्तविक नाम भरें।'); return; }
+    if (!name.trim()) { setError(t('nameRequired')); return; }
     setError(''); setBusy(true);
     try {
       await completeRegistration({ uid: identity.uid, email: identity.email, name, phone, avatar, photoUrl });
@@ -70,7 +88,7 @@ function ProfileSteps({ identity, onDone }) {
       getPhoneContacts().catch(() => {});
       onDone?.();
     } catch (e) {
-      setError(e.message || 'प्रोफ़ाइल सेव नहीं हुई।');
+      setError(e.message || t('start'));
     } finally {
       setBusy(false);
     }
@@ -80,10 +98,10 @@ function ProfileSteps({ identity, onDone }) {
     return (
       <section className="card auth-card">
         <StepDots step={2} />
-        <h1>मोबाइल नंबर</h1>
-        <p className="muted">दोस्तों के फ़ोन कॉन्टैक्ट से आपको जल्दी ढूंढने में मदद करता है — चाहें तो छोड़ सकते हैं।</p>
-        <label>मोबाइल नंबर <span className="optional">(वैकल्पिक)</span><input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoFocus /></label>
-        <button className="primary" onClick={() => setStep(3)}>आगे बढ़ें</button>
+        <h1>{t('phone')}</h1>
+        <p className="muted">{t('phoneHint')}</p>
+        <label>{t('phone')} <span className="optional">({t('optional')})</span><input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoFocus /></label>
+        <button className="primary" onClick={() => setStep(3)}>{t('continueBtn')}</button>
       </section>
     );
   }
@@ -91,26 +109,28 @@ function ProfileSteps({ identity, onDone }) {
   return (
     <section className="card auth-card">
       <StepDots step={3} />
-      <h1>अपनी प्रोफ़ाइल बनाएं</h1>
+      <h1>{t('buildProfile')}</h1>
       <form onSubmit={finish}>
-        <label>वास्तविक नाम<input value={name} onChange={e => setName(e.target.value)} required autoFocus /></label>
-        <p className="muted small">प्रोफ़ाइल फ़ोटो <span className="optional">(वैकल्पिक)</span></p>
+        <label>{t('name')}<input value={name} onChange={e => setName(e.target.value)} required autoFocus /></label>
+        <p className="muted small">{t('addPhoto')} <span className="optional">({t('optional')})</span></p>
         <PhotoPicker photoUrl={photoUrl} onChange={setPhotoUrl} />
-        <p className="muted small">या एक अवतार चुनें</p>
+        <p className="muted small">{t('chooseAvatar')}</p>
         <AvatarPicker selected={avatar} onSelect={setAvatar} />
         {error && <div className="error">{error}</div>}
         <div className="step-actions">
-          <button type="button" className="secondary" onClick={() => setStep(2)}>वापस</button>
-          <button className="primary" disabled={busy}>{busy ? 'सेव हो रहा है…' : 'शुरू करें'}</button>
+          <button type="button" className="secondary" onClick={() => setStep(2)}>{t('back')}</button>
+          <button className="primary" disabled={busy}>{busy ? t('saving') : t('start')}</button>
         </div>
       </form>
     </section>
   );
 }
 
-// Step 1: code + credentials. Resolves invite/admin code and creates the
-// Firebase Auth account, then hands off to ProfileSteps.
+// Step 1: credentials. Creates the Firebase Auth account (and silently
+// resolves admin status -- see adminAccess.js), then hands off to
+// ProfileSteps.
 function RegisterWizard() {
+  const { t } = usePrefs();
   const [identity, setIdentity] = useState(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -126,7 +146,7 @@ function RegisterWizard() {
       const result = await beginRegistration(email, password);
       setIdentity(result);
     } catch (e) {
-      setError(e.message || 'प्रक्रिया पूरी नहीं हुई।');
+      setError(e.message || t('pleaseWait'));
     } finally {
       setBusy(false);
     }
@@ -134,23 +154,22 @@ function RegisterWizard() {
 
   return (
     <section className="card auth-card">
-      <img className="brand-image" src="/school-chat-icon.png" alt="School Chat" />
-      <h1>School Chat</h1>
+      <img className="brand-image" src="/school-chat-icon.png" alt={t('appName')} />
+      <h1>{t('appName')}</h1>
       <StepDots step={1} />
-      <p className="disclosure">
-        यह ऐप एडमिन-मॉनिटर्ड है: इस ऐप में होने वाली सभी चैट — आपकी एडमिन से बातचीत और आपस में दो दोस्तों की चैट भी — एडमिन को दिखती हैं। खाता बनाकर आप इससे सहमत हैं।
-      </p>
+      <p className="disclosure">{t('disclosure')}</p>
       <form onSubmit={submit}>
-        <label>ईमेल<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
-        <label>पासवर्ड<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength="6" required /></label>
+        <label>{t('email')}<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
+        <label>{t('password')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength="6" required /></label>
         {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? 'कृपया प्रतीक्षा करें…' : 'आगे बढ़ें'}</button>
+        <button className="primary" disabled={busy}>{busy ? t('pleaseWait') : t('continueBtn')}</button>
       </form>
     </section>
   );
 }
 
 function LoginForm({ onSwitch }) {
+  const { t } = usePrefs();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -162,7 +181,7 @@ function LoginForm({ onSwitch }) {
     try {
       await login(email, password);
     } catch (e) {
-      setError(e.message || 'प्रक्रिया पूरी नहीं हुई।');
+      setError(e.message || t('pleaseWait'));
     } finally {
       setBusy(false);
     }
@@ -170,21 +189,22 @@ function LoginForm({ onSwitch }) {
 
   return (
     <section className="card auth-card">
-      <img className="brand-image" src="/school-chat-icon.png" alt="School Chat" />
-      <h1>School Chat</h1>
-      <p className="muted">अपने समूह से जुड़े रहें</p>
+      <img className="brand-image" src="/school-chat-icon.png" alt={t('appName')} />
+      <h1>{t('appName')}</h1>
+      <p className="muted">{t('tagline')}</p>
       <form onSubmit={submit}>
-        <label>ईमेल<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
-        <label>पासवर्ड<input type="password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
+        <label>{t('email')}<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
+        <label>{t('password')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
         {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? 'कृपया प्रतीक्षा करें…' : 'प्रवेश करें'}</button>
+        <button className="primary" disabled={busy}>{busy ? t('pleaseWait') : t('login')}</button>
       </form>
-      <button className="link" onClick={onSwitch}>नया खाता बनाएँ</button>
+      <button className="link" onClick={onSwitch}>{t('newAccount')}</button>
     </section>
   );
 }
 
 function AuthScreen({ bannedMsg }) {
+  const { t } = usePrefs();
   const [mode, setMode] = useState('login');
   return (
     <main className="auth">
@@ -192,7 +212,7 @@ function AuthScreen({ bannedMsg }) {
       {mode === 'register'
         ? <RegisterWizard />
         : <LoginForm onSwitch={() => setMode('register')} />}
-      {mode === 'login' && <button className="link outside" onClick={() => setMode('register')}>पहले से खाता नहीं है? नया खाता बनाएँ</button>}
+      {mode === 'login' && <button className="link outside" onClick={() => setMode('register')}>{t('noAccount')}</button>}
     </main>
   );
 }
@@ -234,20 +254,22 @@ function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, select
 }
 
 function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDeleteForEveryone }) {
+  const { t } = usePrefs();
   useBackHandler(onClose);
   return (
     <div className="msg-actions" onClick={onClose}>
       <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
-        <button onClick={onDeleteForMe}><Trash2 size={18} /> मेरे लिए हटाएं</button>
-        {canDeleteForEveryone && <button className="danger" onClick={onDeleteForEveryone}><Trash2 size={18} /> सबके लिए हटाएं</button>}
-        <button className="cancel" onClick={onClose}>रद्द करें</button>
+        <button onClick={onDeleteForMe}><Trash2 size={18} /> {t('deleteForMe')}</button>
+        {canDeleteForEveryone && <button className="danger" onClick={onDeleteForEveryone}><Trash2 size={18} /> {t('deleteForEveryone')}</button>}
+        <button className="cancel" onClick={onClose}>{t('cancel')}</button>
       </div>
     </div>
   );
 }
 
 function Chat({ me, user, onBack }) {
+  const { t, lang } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
   const [hidden, setHidden] = useState({});
@@ -375,12 +397,12 @@ function Chat({ me, user, onBack }) {
     <div className="screen chat-screen">
       {selectionMode ? (
         <header className="topbar selection-bar">
-          <button className="icon" onClick={clearSelection}><X /></button>
-          <b className="grow">{selectedIds.size} चुने गए</b>
-          <button className="icon" onClick={selectAll} title="सभी चुनें"><CheckSquare size={20} /></button>
-          <button className="icon" onClick={copySelected} title="कॉपी करें">{copiedTick ? <Check size={20} /> : <Copy size={20} />}</button>
-          <button className="icon" onClick={shareSelected} title="शेयर करें"><Share2 size={20} /></button>
-          <button className="icon" onClick={() => setShowDeleteSheet(true)} title="हटाएं"><Trash2 size={20} /></button>
+          <button className="icon" onClick={clearSelection}><ArrowLeft /></button>
+          <b className="grow">{selectedIds.size} {t('selectedCount')}</b>
+          <button className="icon" onClick={selectAll} title={t('selectAll')}><CheckSquare size={20} /></button>
+          <button className="icon" onClick={copySelected} title={t('copy')}>{copiedTick ? <Check size={20} /> : <Copy size={20} />}</button>
+          <button className="icon" onClick={shareSelected} title={t('share')}><Share2 size={20} /></button>
+          <button className="icon" onClick={() => setShowDeleteSheet(true)} title={t('delete')}><Trash2 size={20} /></button>
         </header>
       ) : (
         <header className="topbar">
@@ -388,10 +410,10 @@ function Chat({ me, user, onBack }) {
           <Avatar user={user} size="sm" />
           <div className="chat-title">
             <b>{user.name}</b>
-            <small>{user.online ? 'ऑनलाइन' : formatLastSeen(user.lastSeen)}</small>
-            {otherTyping && <span className="typing-label">टाइप कर रहा है…</span>}
+            <small>{user.online ? t('online2') : formatLastSeen(user.lastSeen, t, lang)}</small>
+            {otherTyping && <span className="typing-label">{t('typing')}</span>}
           </div>
-          <div className="online-dot" title={user.online ? 'ऑनलाइन' : 'ऑफलाइन'} />
+          <div className="online-dot" title={user.online ? t('online2') : t('offline')} />
         </header>
       )}
       <div className="messages" ref={listRef}>
@@ -406,7 +428,7 @@ function Chat({ me, user, onBack }) {
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
       <form className="composer" onSubmit={submit}>
-        <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder="संदेश लिखें…" />
+        <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder={t('messagePlaceholder')} />
         <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
       {showDeleteSheet && (
@@ -422,6 +444,7 @@ function Chat({ me, user, onBack }) {
 }
 
 function AppShell({ me, profile }) {
+  const { t, lang } = usePrefs();
   const [users, setUsers] = useState([]);
   const [query, setQuery] = useState('');
   const [chatUser, setChatUser] = useState(null);
@@ -434,11 +457,21 @@ function AppShell({ me, profile }) {
   const [statusUids, setStatusUids] = useState(new Set());
   const [statusOwner, setStatusOwner] = useState(null); // whose status is being viewed
   const [composing, setComposing] = useState(false);
+  const [matchedUids, setMatchedUids] = useState(new Set());
 
   useEffect(() => onValue(ref(db, 'users'), s => {
     const all = s.val() || {};
     setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid));
   }), [me.uid]);
+
+  // Match phone contacts once we actually have a user list to match against.
+  // Quiet by design -- no UI announces this; it just gently prioritises
+  // people you actually know when sorting the list below.
+  useEffect(() => {
+    if (!users.length) return;
+    matchContactUids(users).then(setMatchedUids).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length]);
 
   useEffect(() => onValue(ref(db, `users/${me.uid}/unread`), s => setUnread(s.val() || {})), [me.uid]);
   useEffect(() => {
@@ -490,9 +523,11 @@ function AppShell({ me, profile }) {
       const pa = previews[chatIdFor(me.uid, a.uid)]?.at || 0;
       const pb = previews[chatIdFor(me.uid, b.uid)]?.at || 0;
       if (pa !== pb) return pb - pa;
-      return Number(b.online) - Number(a.online) || (a.name || '').localeCompare(b.name || '');
+      return Number(b.online) - Number(a.online)
+        || Number(matchedUids.has(b.uid)) - Number(matchedUids.has(a.uid))
+        || (a.name || '').localeCompare(b.name || '');
     }),
-  [users, query, previews, me.uid]);
+  [users, query, previews, me.uid, matchedUids]);
 
   const totalUnread = Object.values(unread).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const adminUser = users.find(u => u.role === 'admin');
@@ -504,6 +539,7 @@ function AppShell({ me, profile }) {
     return (
       <div className="screen">
         <header className="topbar">
+          <button className="icon" onClick={() => setView('chats')}><ArrowLeft /></button>
           <div className="brand-line"><ShieldCheck /><div><b>Admin Dashboard</b><small>{profile.name}</small></div></div>
         </header>
         <main className="content"><AdminPanel users={users} me={me} /></main>
@@ -524,12 +560,12 @@ function AppShell({ me, profile }) {
         </button>
       </header>
       <main className="content">
-        <div className="search"><Search size={19} /><input placeholder="नाम, ईमेल या नंबर खोजें" value={query} onChange={e => setQuery(e.target.value)} /></div>
+        <div className="search"><Search size={19} /><input placeholder={t('searchPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></div>
 
-        <div className="section-title"><h3>आपके संपर्क</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} ऑनलाइन</span></div>
+        <div className="section-title"><h3>{t('yourContacts')}</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} {t('online')}</span></div>
         {filtered.map(u => {
           const preview = previews[chatIdFor(me.uid, u.uid)];
-          const subtitle = preview ? `${preview.mine ? 'आप: ' : ''}${preview.text}` : (u.online ? 'ऑनलाइन' : formatLastSeen(u.lastSeen));
+          const subtitle = preview ? `${preview.mine ? t('youPrefix') : ''}${preview.text}` : (u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang));
           return (
             <div className="user-row" key={u.uid}>
               <button className={`avatar-wrap ${statusUids.has(u.uid) ? 'has-status' : ''}`} onClick={() => setStatusOwner(u)}>
@@ -543,7 +579,7 @@ function AppShell({ me, profile }) {
             </div>
           );
         })}
-        {!filtered.length && <div className="empty"><Users size={38} /><p>कोई उपयोगकर्ता नहीं मिला।</p></div>}
+        {!filtered.length && <div className="empty"><Users size={38} /><p>{t('noUsersFound')}</p></div>}
       </main>
       {settings && <SettingsDrawer
         me={me} profile={profile} adminUser={adminUser}
@@ -560,6 +596,7 @@ function AppShell({ me, profile }) {
 }
 
 function StatusComposer({ me, onClose }) {
+  const { t } = usePrefs();
   useBackHandler(onClose);
   const [tab, setTab] = useState('text');
   const [text, setText] = useState('');
@@ -583,10 +620,10 @@ function StatusComposer({ me, onClose }) {
     setError(''); setBusy(true);
     try {
       if (tab === 'text') {
-        if (!text.trim()) { setError('कुछ लिखें।'); setBusy(false); return; }
+        if (!text.trim()) { setError(t('writeSomethingError')); setBusy(false); return; }
         await postStatus(me.uid, { type: 'text', content: JSON.stringify({ text: text.trim(), bg }) });
       } else {
-        if (!file) { setError(tab === 'photo' ? 'एक फ़ोटो चुनें।' : 'एक वीडियो चुनें।'); setBusy(false); return; }
+        if (!file) { setError(tab === 'photo' ? t('choosePhotoError') : t('chooseVideoError')); setBusy(false); return; }
         const statusId = `${Date.now()}`;
         const url = await uploadStatusMedia(me.uid, statusId, file);
         await postStatus(me.uid, { type: tab === 'photo' ? 'image' : 'video', content: url });
@@ -595,7 +632,7 @@ function StatusComposer({ me, onClose }) {
     } catch (e) {
       console.error('Status publish failed:', e);
       const code = e?.code ? ` (${e.code})` : '';
-      setError((e.message || 'स्टेटस पोस्ट नहीं हो सका।') + code);
+      setError((e.message || t('statusPostFailed')) + code);
     } finally {
       setBusy(false);
     }
@@ -604,16 +641,16 @@ function StatusComposer({ me, onClose }) {
   return (
     <div className="status-composer-overlay" onClick={onClose}>
       <div className="status-composer" onClick={e => e.stopPropagation()}>
-        <div className="drawer-head"><b>स्टेटस लगाएं</b><button className="icon" onClick={onClose}><X /></button></div>
+        <PanelHeader title={t('statusComposerTitle')} onBack={onClose} />
         <div className="composer-tabs">
-          <button className={tab === 'text' ? 'active' : ''} onClick={() => { setTab('text'); setFile(null); setPreview(''); }}><TypeIcon size={16} /> टेक्स्ट</button>
-          <button className={tab === 'photo' ? 'active' : ''} onClick={() => setTab('photo')}><ImageIcon size={16} /> फ़ोटो</button>
-          <button className={tab === 'video' ? 'active' : ''} onClick={() => setTab('video')}><Video size={16} /> वीडियो</button>
+          <button className={tab === 'text' ? 'active' : ''} onClick={() => { setTab('text'); setFile(null); setPreview(''); }}><TypeIcon size={16} /> {t('textTab')}</button>
+          <button className={tab === 'photo' ? 'active' : ''} onClick={() => setTab('photo')}><ImageIcon size={16} /> {t('photoTab')}</button>
+          <button className={tab === 'video' ? 'active' : ''} onClick={() => setTab('video')}><Video size={16} /> {t('videoTab')}</button>
         </div>
 
         {tab === 'text' && (
           <div className="status-text-preview" style={{ background: bg }}>
-            <textarea value={text} onChange={e => setText(e.target.value)} placeholder="कुछ लिखें…" maxLength={200} />
+            <textarea value={text} onChange={e => setText(e.target.value)} placeholder={t('writeSomething')} maxLength={200} />
           </div>
         )}
         {tab === 'text' && (
@@ -626,28 +663,30 @@ function StatusComposer({ me, onClose }) {
           <button type="button" className="media-pick-box" onClick={() => fileRef.current?.click()}>
             {preview
               ? (tab === 'photo' ? <img src={preview} alt="" /> : <video src={preview} muted playsInline />)
-              : <span>{tab === 'photo' ? 'फ़ोटो चुनें' : 'वीडियो चुनें (अधिकतम 15MB)'}</span>}
+              : <span>{tab === 'photo' ? t('choosePhoto') : t('chooseVideo')}</span>}
           </button>
         )}
         <input ref={fileRef} type="file" hidden accept={tab === 'photo' ? 'image/*' : 'video/*'} onChange={pickFile} />
 
         {error && <div className="error">{error}</div>}
-        <button className="primary status-publish" onClick={publish} disabled={busy}>{busy ? 'पोस्ट हो रहा है…' : 'स्टेटस पोस्ट करें'}</button>
+        <button className="primary status-publish" onClick={publish} disabled={busy}>{busy ? t('publishing') : t('publish')}</button>
       </div>
     </div>
   );
 }
 
 function AdminTabBar({ view, setView }) {
+  const { t } = usePrefs();
   return (
     <nav className="tab-bar">
-      <button className={view === 'chats' ? 'active' : ''} onClick={() => setView('chats')}><MessagesSquare size={20} /><span>चैट</span></button>
-      <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}><LayoutGrid size={20} /><span>एडमिन</span></button>
+      <button className={view === 'chats' ? 'active' : ''} onClick={() => setView('chats')}><MessagesSquare size={20} /><span>{t('chatsTab')}</span></button>
+      <button className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}><LayoutGrid size={20} /><span>{t('adminTab')}</span></button>
     </nav>
   );
 }
 
 function ProfileEditPanel({ me, profile, onClose }) {
+  const { t } = usePrefs();
   const [name, setName] = useState(profile.name);
   const [phone, setPhone] = useState(profile.phone || '');
   const [avatar, setAvatar] = useState(profile.avatar || AVATARS[0]);
@@ -667,14 +706,14 @@ function ProfileEditPanel({ me, profile, onClose }) {
   return (
     <div className="settings-panel">
       <PhotoPicker photoUrl={photoUrl} onChange={setPhotoUrl} />
-      <p className="muted small">या एक अवतार चुनें</p>
+      <p className="muted small">{t('chooseAvatar')}</p>
       <AvatarPicker selected={avatar} onSelect={a => { setAvatar(a); setPhotoUrl(''); }} />
-      <label>नाम<input value={name} onChange={e => setName(e.target.value)} /></label>
-      <label>मोबाइल नंबर<input value={phone} onChange={e => setPhone(e.target.value)} /></label>
-      <label>ईमेल <span className="optional">(लॉगिन आईडी, बदला नहीं जा सकता)</span><input value={profile.email} readOnly /></label>
+      <label>{t('name')}<input value={name} onChange={e => setName(e.target.value)} /></label>
+      <label>{t('phone')}<input value={phone} onChange={e => setPhone(e.target.value)} /></label>
+      <label>{t('email')} <span className="optional">({t('emailLoginIdHint')})</span><input value={profile.email} readOnly /></label>
       <div className="step-actions">
-        <button className="secondary" onClick={onClose}>वापस</button>
-        <button className="primary" onClick={save} disabled={saving}>{saving ? 'सेव हो रहा है…' : 'सेव करें'}</button>
+        <button className="secondary" onClick={onClose}>{t('back')}</button>
+        <button className="primary" onClick={save} disabled={saving}>{saving ? t('saving') : t('save')}</button>
       </div>
     </div>
   );
@@ -692,12 +731,12 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   useBackHandler(backHandler);
 
   if (panel === 'editProfile') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
-    <div className="drawer-head"><b>प्रोफ़ाइल एडिट करें</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <PanelHeader title={t('editProfile')} onBack={() => setPanel('main')} />
     <ProfileEditPanel me={me} profile={profile} onClose={() => setPanel('main')} />
   </aside></div>;
 
   if (panel === 'language') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
-    <div className="drawer-head"><b>{t('language')}</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <PanelHeader title={t('language')} onBack={() => setPanel('main')} />
     <div className="lang-options">
       <button className={lang === 'hi' ? 'active' : ''} onClick={() => { setLang('hi'); setPanel('main'); }}>{t('langHindi')}</button>
       <button className={lang === 'en' ? 'active' : ''} onClick={() => { setLang('en'); setPanel('main'); }}>{t('langEnglish')}</button>
@@ -705,7 +744,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   </aside></div>;
 
   if (panel === 'theme') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
-    <div className="drawer-head"><b>{t('theme')}</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <PanelHeader title={t('theme')} onBack={() => setPanel('main')} />
     <div className="theme-options">
       <button className={theme === 'light' ? 'active' : ''} onClick={() => { setTheme('light'); setPanel('main'); }}>{t('themeLight')}</button>
       <button className={theme === 'dark' ? 'active' : ''} onClick={() => { setTheme('dark'); setPanel('main'); }}>{t('themeDark')}</button>
@@ -714,17 +753,17 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   </aside></div>;
 
   if (panel === 'applock') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
-    <div className="drawer-head"><b>{t('appLock')}</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <PanelHeader title={t('appLock')} onBack={() => setPanel('main')} />
     <PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} />
-    {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>ऐप लॉक हटाएं</button>}
+    {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>{t('removeAppLock')}</button>}
   </aside></div>;
 
   if (panel === 'update') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
-    <div className="drawer-head"><b>अपडेट</b><button className="icon" onClick={() => setPanel('main')}><ArrowLeft /></button></div>
+    <PanelHeader title={t('update')} onBack={() => setPanel('main')} />
     <div className="update-panel">
-      <p>वर्तमान वर्ज़न: <b>v{APP_VERSION}</b></p>
-      <p className="muted small">नया वर्ज़न इंस्टॉल करने पर यह अपने-आप पुराने की जगह ले लेगा (uninstall करने की ज़रूरत नहीं) — जब तक दोनों एक ही जगह से बने हों।</p>
-      <button className="primary" onClick={() => window.open(UPDATE_URL, '_blank')}>नया वर्ज़न देखें</button>
+      <p>{t('currentVersion')}: <b>v{APP_VERSION}</b></p>
+      <p className="muted small">{t('updateHint')}</p>
+      <button className="primary" onClick={() => window.open(UPDATE_URL, '_blank')}>{t('checkUpdate')}</button>
     </div>
   </aside></div>;
 
@@ -739,16 +778,16 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   return (
     <div className="overlay" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
-        <div className="drawer-head"><b>{t('settings')}</b><button className="icon" onClick={onClose}><X /></button></div>
-        <p className="disclosure small">यह ऐप एडमिन-मॉनिटर्ड है — सभी चैट एडमिन को दिख सकती हैं।</p>
-        <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> प्रोफ़ाइल <span className="row-end">›</span></button>
-        <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> स्टेटस <span className="row-end status-text">{hasMyStatus ? 'लगा हुआ है' : 'लगाएं'}</span></button>
+        <PanelHeader title={t('settings')} onBack={onClose} />
+        <p className="disclosure small">{t('disclosure')}</p>
+        <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
+        <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
         {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
         <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
         <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
-        <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? 'चालू' : 'बंद'}</span></button>
-        <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> अपडेट <span className="row-end status-text">v{APP_VERSION}</span></button>
-        {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> Admin Dashboard खोलें <span className="row-end">›</span></button>}
+        <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
+        <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> {t('update')} <span className="row-end status-text">v{APP_VERSION}</span></button>
+        {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> {t('adminDashboardOpen')} <span className="row-end">›</span></button>}
         <button className="setting-row danger" onClick={() => setPanel('logout')}><LogOut /> {t('logout')}</button>
       </aside>
     </div>
@@ -756,6 +795,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
 }
 
 function AdminPanel({ users, me }) {
+  const { t, lang } = usePrefs();
   const [selectedChat, setSelectedChat] = useState(null);
   const [logs, setLogs] = useState([]);
   const [mirrors, setMirrors] = useState({});
@@ -791,7 +831,7 @@ function AdminPanel({ users, me }) {
   const onlineNow = users.filter(u => u.online).length;
 
   const q = query.trim().toLowerCase();
-  const chatLabel = (chatId) => chatId.split('_').map(uid => uid === me.uid ? 'आप' : users.find(u => u.uid === uid)?.name || 'उपयोगकर्ता').join(' ↔ ');
+  const chatLabel = (chatId) => chatId.split('_').map(uid => uid === me.uid ? t('you') : users.find(u => u.uid === uid)?.name || t('user')).join(' ↔ ');
   const filteredUsers = q ? users.filter(u => (u.name || '').toLowerCase().includes(q) || (u.phone || '').includes(q) || (u.email || '').toLowerCase().includes(q)) : users;
   const filteredChats = q ? mirroredChats.filter(id => chatLabel(id).toLowerCase().includes(q) || (mirrors[id]?.lastMessage || '').toLowerCase().includes(q)) : mirroredChats;
 
@@ -804,59 +844,60 @@ function AdminPanel({ users, me }) {
         </header>
         <div className="content admin-transcript">
           {logs.length
-            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? 'आप' : users.find(u => u.uid === m.senderId)?.name || 'उपयोगकर्ता'}</b>: {m.text}</div>)
-            : <small>इस चैट में अभी कोई संदेश नहीं है।</small>}
+            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? t('you') : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>: {m.text}</div>)
+            : <small>{t('noMessagesYet')}</small>}
         </div>
       </div>
     );
   }
 
   return <div className="admin">
-    <div className="admin-title"><ShieldCheck size={18} /><h3>एडमिन नियंत्रण</h3></div>
+    <div className="admin-title"><ShieldCheck size={18} /><h3>{t('adminControls')}</h3></div>
 
     <div className="admin-stats">
-      <div><b>{users.length}</b><small>कुल सदस्य</small></div>
-      <div><b className="on">{onlineNow}</b><small>अभी ऑनलाइन</small></div>
-      <div><b>{mirroredChats.length}</b><small>कुल चैट</small></div>
-      <div><b className={activeChatsNow ? 'on' : ''}>{activeChatsNow}</b><small>अभी सक्रिय (3 मिनट में)</small></div>
+      <div><b>{users.length}</b><small>{t('totalMembers')}</small></div>
+      <div><b className="on">{onlineNow}</b><small>{t('onlineNowLabel')}</small></div>
+      <div><b>{mirroredChats.length}</b><small>{t('totalChats')}</small></div>
+      <div><b className={activeChatsNow ? 'on' : ''}>{activeChatsNow}</b><small>{t('activeNowLabel')}</small></div>
     </div>
 
-    <div className="search monitor-search"><Search size={17} /><input placeholder="नाम या नंबर से मॉनिटर करें…" value={query} onChange={e => setQuery(e.target.value)} /></div>
+    <div className="search monitor-search"><Search size={17} /><input placeholder={t('monitorSearchPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></div>
 
-    <h4>सभी सदस्य</h4>
+    <h4>{t('allMembers')}</h4>
     {filteredUsers.map(u => (
       <div className="monitor-row static" key={u.uid}>
         <Avatar user={u} size="sm" />
         <span className="grow"><b>{u.name}{u.role === 'admin' ? ' 👑' : ''}</b><small>{u.phone || u.email}</small></span>
-        <span className={`presence-label ${u.online ? 'on' : ''}`}>{u.online ? 'ऑनलाइन' : formatLastSeen(u.lastSeen)}</span>
-        {u.role !== 'admin' && <button className="remove-btn" onClick={() => confirmRemove(u)}>हटाएं</button>}
+        <span className={`presence-label ${u.online ? 'on' : ''}`}>{u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang)}</span>
+        {u.role !== 'admin' && <button className="remove-btn" onClick={() => confirmRemove(u)}>{t('remove2')}</button>}
       </div>
     ))}
-    {!filteredUsers.length && <small>कोई सदस्य नहीं मिला।</small>}
+    {!filteredUsers.length && <small>{t('noMembersFound')}</small>}
     {removing && <div className="msg-actions" onClick={() => setRemoving(null)}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
-        <p style={{ padding: '4px 20px 10px' }}>{removing.name} को हटाएं? यह उनकी प्रोफ़ाइल और सभी चैट डेटाबेस से मिटा देगा, और वो अब लॉगिन नहीं कर पाएंगे — पर उनका ईमेल/पासवर्ड Firebase से पूरी तरह मिटाना client ऐप से संभव नहीं, सिर्फ़ एक्सेस बंद होगा।</p>
-        <button className="danger" onClick={doRemove}>हाँ, हटाएं</button>
-        <button className="cancel" onClick={() => setRemoving(null)}>रद्द करें</button>
+        <p style={{ padding: '4px 20px 10px' }}>{removing.name}{t('removeConfirmPart1')}</p>
+        <button className="danger" onClick={doRemove}>{t('yesRemove')}</button>
+        <button className="cancel" onClick={() => setRemoving(null)}>{t('cancel')}</button>
       </div>
     </div>}
 
-    <h4>सभी रिकॉर्ड की गई चैट (मॉनिटरिंग)</h4>
+    <h4>{t('allRecordedChats')}</h4>
     {filteredChats.map(chatId => {
       const parts = chatId.split('_');
-      const chatUsers = parts.map(uid => uid === me.uid ? { uid, name: 'आप' } : users.find(u => u.uid === uid) || { uid, name: 'उपयोगकर्ता' });
+      const chatUsers = parts.map(uid => uid === me.uid ? { uid, name: t('you') } : users.find(u => u.uid === uid) || { uid, name: t('user') });
       const isActive = now - (mirrors[chatId]?.lastMessageAt || 0) < ACTIVE_WINDOW;
       return <button className="monitor-row" key={chatId} onClick={() => setSelectedChat(chatId)}>
         <Avatar user={chatUsers[0]} size="sm" />
-        <span className="grow"><b>{chatUsers.map(u => u.name).join(' ↔ ')}{isActive && <span className="live-dot" title="अभी सक्रिय" />}</b><small>{mirrors[chatId]?.lastMessage || 'कोई संदेश नहीं'}</small></span>
-        <small className="mono-time">{mirrors[chatId]?.lastMessageAt ? formatLastSeen(mirrors[chatId].lastMessageAt) : ''}</small>
+        <span className="grow"><b>{chatUsers.map(u => u.name).join(' ↔ ')}{isActive && <span className="live-dot" title={t('activeRightNow')} />}</b><small>{mirrors[chatId]?.lastMessage || t('noMessage')}</small></span>
+        <small className="mono-time">{mirrors[chatId]?.lastMessageAt ? formatLastSeen(mirrors[chatId].lastMessageAt, t, lang) : ''}</small>
       </button>;
     })}
-    {!filteredChats.length && <small>{q ? 'खोज से कोई चैट नहीं मिली।' : 'अभी कोई चैट रिकॉर्ड नहीं हुई है।'}</small>}
+    {!filteredChats.length && <small>{q ? t('noChatsFoundSearch') : t('noChatsRecorded')}</small>}
   </div>;
 }
 
 export default function App() {
+  const { t } = usePrefs();
   const [me, setMe] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -889,7 +930,7 @@ export default function App() {
       unsub = onAuthStateChanged(auth, async user => {
         if (user && await isBanned(user.uid)) {
           await logout().catch(() => {});
-          setBannedMsg('आपकी एक्सेस हटा दी गई है।');
+          setBannedMsg(t('bannedMessage'));
           setMe(null); setProfile(null); setLoading(false);
           return;
         }
@@ -909,13 +950,13 @@ export default function App() {
   if (firebaseInitError) {
     content = (
       <div className="splash config-error">
-        <img src="/school-chat-icon.png" alt="School Chat" />
-        <span>Setup अधूरा है</span>
+        <img src="/school-chat-icon.png" alt={t('appName')} />
+        <span>{t('setupIncomplete')}</span>
         <p>{firebaseInitError}</p>
       </div>
     );
   } else if (loading) {
-    content = <div className="splash"><img src="/school-chat-icon.png" alt="School Chat" /><span>School Chat</span></div>;
+    content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span></div>;
   } else if (!me) {
     content = <AuthScreen bannedMsg={bannedMsg} />;
   } else if (!profile) {
@@ -927,7 +968,7 @@ export default function App() {
   return (
     <>
       {content}
-      {exitToast && <div className="toast-exit">फिर से दबाएं, ऐप से बाहर जाने के लिए</div>}
+      {exitToast && <div className="toast-exit">{t('pressAgainExit')}</div>}
     </>
   );
 }

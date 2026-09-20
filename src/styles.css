@@ -183,3 +183,20 @@ input,textarea{user-select:text;-webkit-user-select:text}
 .update-panel{padding:0 4px}
 .update-panel p{margin:0 0 12px}
 .update-panel .primary{width:100%}
+.panel-header{display:flex;align-items:center;padding-bottom:8px}
+.panel-header-title{flex:1;text-align:center;font-size:18px;font-weight:800}
+.panel-header-spacer{width:42px;flex-shrink:0}
+/* Smoother, more "premium" tap feedback everywhere -- replaces the abrupt
+   flat-colour :active swaps with a gentle scale + fade, and gives every
+   tappable row a proper transition instead of snapping instantly. */
+button,.user-row,.setting-row,.monitor-row,.panel-header .icon,.icon,.avatar-shell,.status-avatar-btn,.avatar-wrap{
+  transition:transform .12s cubic-bezier(.2,.8,.2,1),background-color .18s ease,box-shadow .18s ease,opacity .18s ease;
+  -webkit-tap-highlight-color:transparent
+}
+button:active:not(:disabled),.user-row:active,.setting-row:active,.monitor-row:active,.icon:active,.avatar-shell:active,.status-avatar-btn:active{
+  transform:scale(.96);
+  opacity:.85
+}
+.user-row:active,.setting-row:active{box-shadow:0 1px 4px #0f172a0a}
+.setting-row:active{background:#f8fafc}
+.primary:active:not(:disabled),.send:active:not(:disabled){transform:scale(.95);box-shadow:0 2px 8px #0f6fe855}

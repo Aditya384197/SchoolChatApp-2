@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { usePrefs } from '../context/Prefs';
 
 // Same emoji set style as the AI-Studio version the user liked.
 export const AVATARS = ['🧑‍🎓', '👩‍🎓', '🧑‍💻', '👩‍💻', '🚀', '⭐', '🦁', '🦊', '🦉', '🎯', '⚡', '🔥'];
@@ -27,6 +28,7 @@ const OUTPUT = 480;     // exported photo size, px
 
 // A real drag-to-reposition + pinch/scroll-to-zoom circular crop tool.
 function CropModal({ src, onCancel, onSave }) {
+  const { t } = usePrefs();
   const imgRef = useRef(null);
   const [natural, setNatural] = useState({ w: 1, h: 1 });
   const [scale, setScale] = useState(1);
@@ -90,7 +92,7 @@ function CropModal({ src, onCancel, onSave }) {
   return (
     <div className="crop-overlay">
       <div className="crop-card">
-        <b>फ़ोटो एडजस्ट करें</b>
+        <b>{t('adjustPhoto')}</b>
         <div className="crop-box" style={{ width: CROP_BOX, height: CROP_BOX }}
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
           <img
@@ -101,8 +103,8 @@ function CropModal({ src, onCancel, onSave }) {
         </div>
         <input type="range" min="1" max="3" step="0.01" value={scale} onChange={handleZoom} className="crop-zoom" />
         <div className="step-actions">
-          <button type="button" className="secondary" onClick={onCancel}>रद्द करें</button>
-          <button type="button" className="primary" onClick={save}>सेव करें</button>
+          <button type="button" className="secondary" onClick={onCancel}>{t('cancel')}</button>
+          <button type="button" className="primary" onClick={save}>{t('save')}</button>
         </div>
       </div>
     </div>
@@ -110,6 +112,7 @@ function CropModal({ src, onCancel, onSave }) {
 }
 
 export function PhotoPicker({ photoUrl, onChange }) {
+  const { t } = usePrefs();
   const fileRef = useRef(null);
   const [rawSrc, setRawSrc] = useState(null);
 
@@ -125,11 +128,11 @@ export function PhotoPicker({ photoUrl, onChange }) {
   return (
     <div className="photo-picker">
       <button type="button" className="photo-preview" onClick={() => fileRef.current?.click()}>
-        {photoUrl ? <img src={photoUrl} alt="" /> : <span>फ़ोटो जोड़ें</span>}
+        {photoUrl ? <img src={photoUrl} alt="" /> : <span>{t('addPhoto')}</span>}
       </button>
       {/* capture="user" nudges mobile browsers to offer the front camera alongside gallery */}
       <input ref={fileRef} type="file" accept="image/*" capture="user" hidden onChange={handleFile} />
-      {photoUrl && <button type="button" className="link small" onClick={() => onChange('')}>हटाएं</button>}
+      {photoUrl && <button type="button" className="link small" onClick={() => onChange('')}>{t('removePhoto')}</button>}
       {rawSrc && <CropModal src={rawSrc} onCancel={() => setRawSrc(null)} onSave={(dataUrl) => { onChange(dataUrl); setRawSrc(null); }} />}
     </div>
   );
