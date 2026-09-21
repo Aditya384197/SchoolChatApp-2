@@ -94,3 +94,15 @@ export async function deleteMessageForEveryone(chatId, messageId) {
     [`adminMirror/${chatId}/messages/${messageId}`]: null
   });
 }
+
+// "Clear chat" -- wipes the whole message history for both sides at once
+// (the chat room/participants stay, so you can keep messaging afterwards).
+// Same as individual delete-for-everyone, this also clears admin's mirror.
+export async function clearChat(chatId) {
+  await update(ref(db), {
+    [`chats/${chatId}/messages`]: null,
+    [`adminMirror/${chatId}/messages`]: null,
+    [`adminMirror/${chatId}/lastMessage`]: null,
+    [`adminMirror/${chatId}/lastMessageAt`]: null,
+  });
+}

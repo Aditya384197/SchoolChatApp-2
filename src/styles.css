@@ -199,9 +199,19 @@ button,.user-row,.setting-row,.monitor-row,.icon,.avatar-shell,.status-avatar-bt
    an unrelated sibling (e.g. the back arrow next to whichever row was
    actually tapped) visually flash as if it were pressed too. Plain
    background/opacity changes don't have that problem. */
-button:active:not(:disabled),.monitor-row:active,.icon:active,.avatar-shell:active,.status-avatar-btn:active{opacity:.8}
+button:active:not(:disabled):not(.icon),.monitor-row:active,.avatar-shell:active,.status-avatar-btn:active{opacity:.8}
+/* Icon-only buttons (back arrow, settings gear, etc.) get a small,
+   contained background wash instead of a whole-icon opacity dim --
+   a full opacity change reads as a visible "glow" and, in this
+   WebView, was occasionally appearing on an unrelated icon near
+   whatever row was actually tapped. A tight background tint on
+   just the icon button is far less noticeable if that ever recurs,
+   while still giving a light tap acknowledgement on the real target. */
+.icon:active{background:rgba(15,23,42,.08)}
 .user-row:active,.setting-row:active{background:#f8fafc}
 .primary:active:not(:disabled),.send:active:not(:disabled){opacity:.85}
 .id-row{display:flex;gap:8px;align-items:center}
 .id-row input{flex:1;font-weight:800;letter-spacing:.5px}
 .id-row button{flex-shrink:0;padding:10px 14px}
+.discovered-row{border:2px dashed #0f6fe8;background:#eff6ff}
+.empty.small{padding:10px 4px;text-align:left;font-size:12px;color:#64748b}

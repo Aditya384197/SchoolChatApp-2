@@ -30,7 +30,9 @@ export const translations = {
     checkUpdate: 'नया वर्ज़न देखें', on: 'चालू', off: 'बंद', adjustPhoto: 'फ़ोटो एडजस्ट करें',
     adminDashboardOpen: 'Admin Dashboard खोलें', chatsTab: 'चैट', adminTab: 'एडमिन', bannedMessage: 'आपकी एक्सेस हटा दी गई है।', setupIncomplete: 'Setup अधूरा है', pressAgainExit: 'फिर से दबाएं, ऐप से बाहर जाने के लिए',
     findById: 'आईडी से ढूंढें', yourId: 'आपकी यूज़र आईडी', shareIdHint: 'यह आईडी दोस्तों को भेजें — वो इसी से आपको ढूंढ पाएंगे। बिना आईडी के कोई आपको ऐप में नहीं देख सकता।',
-    enterFriendId: 'दोस्त की यूज़र आईडी डालें (जैसे SC-AB12CD)', find: 'ढूंढें', notFound: 'यह आईडी नहीं मिली — ध्यान से दोबारा डालें।', foundAdded: 'मिल गया! अब आप इनसे चैट कर सकते हैं।',
+    enterFriendId: 'दोस्त की यूज़र आईडी डालें (जैसे SC-AB12CD)', find: 'ढूंढें', notFound: 'यह आईडी नहीं मिली — ध्यान से दोबारा डालें।', foundAdded: 'मिल गया! टैप करके चैट शुरू करें।',
+    block: 'ब्लॉक करें', unblock: 'अनब्लॉक करें', chatMenu: 'मेन्यू', clearChat: 'चैट साफ़ करें', chatLock: 'चैट लॉक',
+    clearChatConfirm: 'यह पूरी चैट हमेशा के लिए मिटा देगा (दोनों तरफ़ से)। पक्का?', yes: 'हाँ', chatLockOn: 'चालू', chatLockOff: 'बंद',
     // Profile edit
     editProfile: 'प्रोफ़ाइल एडिट करें', save: 'सेव करें', emailLoginIdHint: 'लॉगिन आईडी, बदला नहीं जा सकता',
     // Chat / messages
@@ -82,7 +84,9 @@ export const translations = {
     checkUpdate: 'Check latest version', on: 'On', off: 'Off', adjustPhoto: 'Adjust photo',
     adminDashboardOpen: 'Open Admin Dashboard', chatsTab: 'Chats', adminTab: 'Admin', bannedMessage: 'Your access has been removed.', setupIncomplete: 'Setup incomplete', pressAgainExit: 'Press back again to exit the app',
     findById: 'Find by ID', yourId: 'Your user ID', shareIdHint: "Share this ID with friends -- it's how they find you. Without it, nobody can see you in the app.",
-    enterFriendId: "Enter a friend's user ID (e.g. SC-AB12CD)", find: 'Find', notFound: 'ID not found — check it and try again.', foundAdded: "Found! You can chat with them now.",
+    enterFriendId: "Enter a friend's user ID (e.g. SC-AB12CD)", find: 'Find', notFound: 'ID not found — check it and try again.', foundAdded: "Found! Tap to start chatting.",
+    block: 'Block', unblock: 'Unblock', chatMenu: 'Menu', clearChat: 'Clear chat', chatLock: 'Chat lock',
+    clearChatConfirm: 'This permanently deletes the whole chat (both sides). Sure?', yes: 'Yes', chatLockOn: 'On', chatLockOff: 'Off',
     editProfile: 'Edit profile', save: 'Save', emailLoginIdHint: "your login ID, can't be changed",
     online2: 'Online', selectedCount: 'selected', selectAll: 'Select all', copy: 'Copy',
     copied: 'Copied', share: 'Share', delete: 'Delete', confirmDelete: 'Cancel',

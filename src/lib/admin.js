@@ -22,6 +22,10 @@ export async function removeUser(uid) {
     [`config/banned/${uid}`]: true,
   };
   if (user.userCode) writes[`userCodeIndex/${user.userCode}`] = null;
+  if (user.email) {
+    const key = String(user.email).trim().toLowerCase().replace(/[.#$/\[\]]/g, '_');
+    writes[`emailIndex/${key}`] = null;
+  }
   if (user.phone) {
     const digits = String(user.phone).replace(/\D/g, '').slice(-10);
     if (digits) writes[`phoneIndex/${digits}`] = null;

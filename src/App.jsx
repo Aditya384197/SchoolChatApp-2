@@ -5,21 +5,21 @@ import {
   ArrowLeft, MessageCircle, Search, Send,
   ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare,
   Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon,
-  Trash2, CheckSquare, Check, LogOut, User, RefreshCw
+  Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
 import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile } from './lib/auth';
 import {
   chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage,
-  deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS
+  deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS, clearChat
 } from './lib/chat';
 import { getPhoneContacts, matchAndSaveContacts } from './lib/contacts';
-import { listenKnownContacts, addKnownContact, findByCode } from './lib/directory';
+import { listenKnownContacts, addKnownContact, removeKnownContact, blockUser, unblockUser, findByCode, findByEmail } from './lib/directory';
 import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
-import { isPinSet, LockScreen, PinPad, clearPin } from './components/AppLock';
+import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
 import { usePrefs } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus } from './lib/status';
@@ -269,6 +269,57 @@ function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDelet
   );
 }
 
+function ChatMenu({ me, user, chatId, onClose, onBlocked }) {
+  const { t } = usePrefs();
+  useBackHandler(onClose);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [lockPanel, setLockPanel] = useState(false);
+  const locked = isChatPinSet(user.uid);
+
+  async function doBlock() {
+    await blockUser(me.uid, user.uid);
+    onBlocked?.();
+  }
+  async function doClear() {
+    await clearChat(chatId);
+    setConfirmClear(false);
+    onClose();
+  }
+
+  if (lockPanel) {
+    return (
+      <div className="overlay" onClick={onClose}>
+        <aside className="drawer" onClick={e => e.stopPropagation()}>
+          <PanelHeader title={t('chatLock')} onBack={() => setLockPanel(false)} />
+          {locked
+            ? <PinPad mode="change" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />
+            : <PinPad mode="set" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />}
+          {locked && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearChatPin(user.uid); setLockPanel(false); }}>{t('removeAppLock')}</button>}
+        </aside>
+      </div>
+    );
+  }
+
+  return (
+    <div className="msg-actions" onClick={onClose}>
+      <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <button className="danger" onClick={doBlock}><Ban size={18} /> {t('block')}</button>
+        {confirmClear ? (
+          <>
+            <p style={{ padding: '0 20px 6px', fontSize: 13 }}>{t('clearChatConfirm')}</p>
+            <button className="danger" onClick={doClear}><Trash2 size={18} /> {t('yes')}</button>
+          </>
+        ) : (
+          <button onClick={() => setConfirmClear(true)}><Trash2 size={18} /> {t('clearChat')}</button>
+        )}
+        <button onClick={() => setLockPanel(true)}><Lock size={18} /> {t('chatLock')} <span className="row-end status-text">{locked ? t('chatLockOn') : t('chatLockOff')}</span></button>
+        <button className="cancel" onClick={onClose}>{t('cancel')}</button>
+      </div>
+    </div>
+  );
+}
+
 function Chat({ me, user, onBack }) {
   const { t, lang } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
@@ -279,6 +330,8 @@ function Chat({ me, user, onBack }) {
   const [sending, setSending] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showDeleteSheet, setShowDeleteSheet] = useState(false);
+  const [showChatMenu, setShowChatMenu] = useState(false);
+  const [chatUnlocked, setChatUnlocked] = useState(!isChatPinSet(user.uid));
   const [copiedTick, setCopiedTick] = useState(false);
   const listRef = useRef(null);
   const inputRef = useRef(null);
@@ -397,6 +450,16 @@ function Chat({ me, user, onBack }) {
   }
 
   const otherTyping = Boolean(typingUsers[user.uid]);
+
+  if (!chatUnlocked) {
+    return (
+      <div className="lock-screen">
+        <Avatar user={user} size="lg" />
+        <PinPad mode="verify" storageKey={chatPinKey(user.uid)} onSuccess={() => setChatUnlocked(true)} onCancel={onBack} />
+      </div>
+    );
+  }
+
   return (
     <div className="screen chat-screen">
       {selectionMode ? (
@@ -417,8 +480,14 @@ function Chat({ me, user, onBack }) {
             <small>{user.online ? t('online2') : formatLastSeen(user.lastSeen, t, lang)}</small>
             {otherTyping && <span className="typing-label">{t('typing')}</span>}
           </div>
-          <div className="online-dot" title={user.online ? t('online2') : t('offline')} />
+          <button className="icon" onClick={() => setShowChatMenu(true)} title={t('chatMenu')}><MoreVertical /></button>
         </header>
+      )}
+      {showChatMenu && (
+        <ChatMenu
+          me={me} user={user} chatId={chatId} onClose={() => setShowChatMenu(false)}
+          onBlocked={onBack}
+        />
       )}
       <div className="messages" ref={listRef}>
         {visibleMessages.map(m => (
@@ -447,13 +516,62 @@ function Chat({ me, user, onBack }) {
   );
 }
 
+function ContactRow({ u, subtitle, statusUids, unread, onOpenStatus, onOpenChat, onLongPress }) {
+  const pressTimer = useRef(null);
+  function start() { pressTimer.current = setTimeout(onLongPress, 500); }
+  function stop() { clearTimeout(pressTimer.current); }
+  return (
+    <div className="user-row">
+      <button className={`avatar-wrap ${statusUids.has(u.uid) ? 'has-status' : ''}`} onClick={onOpenStatus}>
+        <Avatar user={u} /> {u.online && <span className="presence-dot" />}
+      </button>
+      <button
+        className="grow user-row-text" onClick={onOpenChat}
+        onPointerDown={start} onPointerUp={stop} onPointerLeave={stop}
+        onContextMenu={e => { e.preventDefault(); onLongPress(); }}
+      >
+        <b>{u.name}</b><small className="truncate">{subtitle}</small>
+      </button>
+      {unread > 0 && <span className="row-unread">{unread}</span>}
+      <button className="icon" onClick={onOpenChat}><MessageCircle size={20} /></button>
+    </div>
+  );
+}
+
+function ContactActionSheet({ user, me, onClose }) {
+  const { t } = usePrefs();
+  useBackHandler(onClose);
+  async function doDelete() {
+    await removeKnownContact(me.uid, user.uid);
+    onClose();
+  }
+  async function doBlock() {
+    await blockUser(me.uid, user.uid);
+    onClose();
+  }
+  return (
+    <div className="msg-actions" onClick={onClose}>
+      <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle" />
+        <p style={{ padding: '0 20px 8px', fontWeight: 700 }}>{user.name}</p>
+        <button onClick={doDelete}><Trash2 size={18} /> {t('delete')}</button>
+        <button className="danger" onClick={doBlock}><Ban size={18} /> {t('block')}</button>
+        <button className="cancel" onClick={onClose}>{t('cancel')}</button>
+      </div>
+    </div>
+  );
+}
+
 function AppShell({ me, profile }) {
   const { t, lang } = usePrefs();
   const [users, setUsers] = useState([]);
   const [knownContacts, setKnownContacts] = useState({});
   const [adminUid, setAdminUid] = useState(null);
   const [query, setQuery] = useState('');
+  const [discovered, setDiscovered] = useState(null); // a person found via exact email/ID search, not yet in your list
+  const [discovering, setDiscovering] = useState(false);
   const [chatUser, setChatUser] = useState(null);
+  const [contactAction, setContactAction] = useState(null);
   const [settings, setSettings] = useState(false);
   const [unread, setUnread] = useState({});
   const [previews, setPreviews] = useState({});
@@ -508,6 +626,36 @@ function AppShell({ me, profile }) {
   useEffect(() => {
     matchAndSaveContacts(me.uid).catch(() => {});
   }, [me.uid]);
+
+  // The same search box also doubles as "find someone new": typing a
+  // complete-looking exact email or user ID looks them up directly (the
+  // only two ways to reach someone who isn't already a phone-contact
+  // match). Plain names never do this lookup -- they only filter the list
+  // already visible below, on purpose.
+  useEffect(() => {
+    const q = query.trim();
+    setDiscovered(null);
+    const looksLikeEmail = q.includes('@') && q.includes('.') && q.length > 5;
+    const looksLikeCode = /^SC-[A-Z0-9]{4,8}$/i.test(q);
+    if (!looksLikeEmail && !looksLikeCode) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setDiscovering(true);
+      try {
+        const found = looksLikeEmail ? await findByEmail(q) : await findByCode(q);
+        if (!cancelled && found && found.uid !== me.uid) setDiscovered(found);
+      } catch { /* not found, ignore */ }
+      finally { if (!cancelled) setDiscovering(false); }
+    }, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, me.uid]);
+
+  async function openDiscovered(found) {
+    await addKnownContact(me.uid, found.uid);
+    setDiscovered(null);
+    setQuery('');
+    setChatUser(found);
+  }
 
   useEffect(() => onValue(ref(db, `users/${me.uid}/unread`), s => setUnread(s.val() || {})), [me.uid]);
   useEffect(() => {
@@ -596,25 +744,34 @@ function AppShell({ me, profile }) {
       <main className="content">
         <div className="search"><Search size={19} /><input placeholder={t('searchPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></div>
 
+        {discovering && <div className="empty small">{t('pleaseWait')}</div>}
+        {discovered && (
+          <button className="user-row discovered-row" onClick={() => openDiscovered(discovered)}>
+            <Avatar user={discovered} />
+            <span className="grow user-row-text"><b>{discovered.name}</b><small className="truncate">{t('foundAdded')}</small></span>
+          </button>
+        )}
+
         <div className="section-title"><h3>{t('yourContacts')}</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} {t('online')}</span></div>
         {filtered.map(u => {
           const preview = previews[chatIdFor(me.uid, u.uid)];
           const subtitle = preview ? `${preview.mine ? t('youPrefix') : ''}${preview.text}` : (u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang));
           return (
-            <div className="user-row" key={u.uid}>
-              <button className={`avatar-wrap ${statusUids.has(u.uid) ? 'has-status' : ''}`} onClick={() => setStatusOwner(u)}>
-                <Avatar user={u} /> {u.online && <span className="presence-dot" />}
-              </button>
-              <button className="grow user-row-text" onClick={() => setChatUser(u)}>
-                <b>{u.name}</b><small className="truncate">{subtitle}</small>
-              </button>
-              {unread[chatIdFor(me.uid, u.uid)] > 0 && <span className="row-unread">{unread[chatIdFor(me.uid, u.uid)]}</span>}
-              <button className="icon" onClick={() => setChatUser(u)}><MessageCircle size={20} /></button>
-            </div>
+            <ContactRow key={u.uid} u={u} subtitle={subtitle} statusUids={statusUids}
+              unread={unread[chatIdFor(me.uid, u.uid)]}
+              onOpenStatus={() => setStatusOwner(u)} onOpenChat={() => setChatUser(u)}
+              onLongPress={() => setContactAction(u)}
+            />
           );
         })}
         {!filtered.length && <div className="empty"><Users size={38} /><p>{t('noUsersFound')}</p></div>}
       </main>
+      {contactAction && (
+        <ContactActionSheet
+          user={contactAction} me={me}
+          onClose={() => setContactAction(null)}
+        />
+      )}
       {settings && <SettingsDrawer
         me={me} profile={profile} adminUser={adminUser}
         onClose={() => setSettings(false)} onOpenChat={setChatUser}
@@ -762,38 +919,6 @@ function ProfileEditPanel({ me, profile, onClose }) {
   );
 }
 
-function FindByIdPanel({ me, onFound }) {
-  const { t } = usePrefs();
-  const [code, setCode] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  async function search(e) {
-    e.preventDefault();
-    setError(''); setBusy(true);
-    try {
-      const found = await findByCode(code);
-      if (!found || found.uid === me.uid) { setError(t('notFound')); return; }
-      await addKnownContact(me.uid, found.uid);
-      onFound(found);
-    } catch {
-      setError(t('notFound'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="settings-panel">
-      <form onSubmit={search}>
-        <label>{t('findById')}<input value={code} onChange={e => setCode(e.target.value)} placeholder={t('enterFriendId')} autoCapitalize="characters" /></label>
-        {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy || !code.trim()}>{busy ? t('pleaseWait') : t('find')}</button>
-      </form>
-    </div>
-  );
-}
-
 function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, hasMyStatus }) {
   const { t, lang, setLang, theme, setTheme } = usePrefs();
   const [panel, setPanel] = useState('main');
@@ -804,11 +929,6 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     else onClose();
   }).current;
   useBackHandler(backHandler);
-
-  if (panel === 'findById') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
-    <PanelHeader title={t('findById')} onBack={() => setPanel('main')} />
-    <FindByIdPanel me={me} onFound={(user) => { onOpenChat(user); onClose(); }} />
-  </aside></div>;
 
   if (panel === 'editProfile') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
     <PanelHeader title={t('editProfile')} onBack={() => setPanel('main')} />
@@ -861,7 +981,6 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
         <PanelHeader title={t('settings')} onBack={onClose} />
         <p className="disclosure small">{t('disclosure')}</p>
         <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
-        <button className="setting-row" onClick={() => setPanel('findById')}><Search /> {t('findById')} <span className="row-end">›</span></button>
         <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
         {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
         <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>

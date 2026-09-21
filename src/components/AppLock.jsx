@@ -4,7 +4,9 @@ import { usePrefs } from '../context/Prefs';
 // Simple, device-local PIN lock (like a phone's app-lock, not an account
 // feature). Only PIN is implemented -- a drawn pattern lock is a separate,
 // fairly large UI component and was left out of this pass; PIN covers the
-// same "keep this app out of casual hands" need.
+// same "keep this app out of casual hands" need. The same PinPad is reused
+// for per-chat "Chat Lock" (a separate PIN, separate from the whole-app
+// lock, scoped to one contact) by passing a different storageKey.
 const KEY = 'schoolChatPinHash';
 
 function hash(pin) {
@@ -24,8 +26,21 @@ export function clearPin() {
   localStorage.removeItem(KEY);
 }
 
-export function PinPad({ mode, onSuccess, onCancel }) {
+export function chatPinKey(otherUid) {
+  return `schoolChatChatPinHash_${otherUid}`;
+}
+
+export function isChatPinSet(otherUid) {
+  return !!localStorage.getItem(chatPinKey(otherUid));
+}
+
+export function clearChatPin(otherUid) {
+  localStorage.removeItem(chatPinKey(otherUid));
+}
+
+export function PinPad({ mode, onSuccess, onCancel, storageKey }) {
   const { t } = usePrefs();
+  const key = storageKey || KEY;
   // mode: 'set' | 'verify' | 'change'
   const [stage, setStage] = useState(mode === 'change' ? 'verifyOld' : mode === 'set' ? 'setNew' : 'verify');
   const [value, setValue] = useState('');
@@ -48,12 +63,12 @@ export function PinPad({ mode, onSuccess, onCancel }) {
 
   function submit(pin) {
     if (stage === 'verify') {
-      if (hash(pin) === localStorage.getItem(KEY)) onSuccess?.();
+      if (hash(pin) === localStorage.getItem(key)) onSuccess?.();
       else { setError(t('wrongPin')); setValue(''); }
       return;
     }
     if (stage === 'verifyOld') {
-      if (hash(pin) === localStorage.getItem(KEY)) { setStage('setNew'); setValue(''); }
+      if (hash(pin) === localStorage.getItem(key)) { setStage('setNew'); setValue(''); }
       else { setError(t('wrongPin')); setValue(''); }
       return;
     }
@@ -63,7 +78,7 @@ export function PinPad({ mode, onSuccess, onCancel }) {
     }
     if (stage === 'confirmNew') {
       if (pin === firstPin) {
-        localStorage.setItem(KEY, hash(pin));
+        localStorage.setItem(key, hash(pin));
         onSuccess?.();
       } else {
         setError(t('pinMismatch'));

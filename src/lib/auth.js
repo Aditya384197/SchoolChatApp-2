@@ -58,6 +58,10 @@ async function claimUserCode(uid) {
   throw new Error('यूज़र आईडी नहीं बन पाई, फिर कोशिश करें।');
 }
 
+function emailKey(email) {
+  return (email || '').trim().toLowerCase().replace(/[.#$/\[\]]/g, '_');
+}
+
 // Phase 2: write the actual profile (name/phone/avatar/photo) once collected.
 // Role is recomputed fresh from config/adminUid here rather than trusted
 // from phase 1, so this also correctly resumes an interrupted sign-up.
@@ -81,6 +85,10 @@ export async function completeRegistration({ uid, email, name, phone, avatar, ph
   });
   const n = normalizePhone(phone);
   if (n) await set(ref(db, `phoneIndex/${n}`), uid).catch(() => {});
+  // Email is already guaranteed unique by Firebase Auth itself, so this can
+  // just be set directly -- it's what lets someone be found by exact email
+  // even before they're anyone's phone contact (see lib/directory.js).
+  await set(ref(db, `emailIndex/${emailKey(email)}`), uid).catch(() => {});
   localStorage.setItem('schoolChatVerified', '1');
   return role;
 }
