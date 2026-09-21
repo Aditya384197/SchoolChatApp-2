@@ -4,7 +4,7 @@
 export const translations = {
   hi: {
     appName: 'School Chat', tagline: 'अपने समूह से जुड़े रहें',
-    disclosure: 'यह ऐप एडमिन-मॉनिटर्ड है: इस ऐप में होने वाली सभी चैट — आपकी एडमिन से बातचीत और आपस में दो दोस्तों की चैट भी — एडमिन को दिखती हैं। खाता बनाकर आप इससे सहमत हैं।',
+    disclosure: 'Welcome',
     email: 'ईमेल', password: 'पासवर्ड', phone: 'मोबाइल नंबर', optional: 'वैकल्पिक',
     name: 'वास्तविक नाम', nameRequired: 'अपना वास्तविक नाम भरें।', continueBtn: 'आगे बढ़ें', pleaseWait: 'कृपया प्रतीक्षा करें…',
     back: 'वापस', start: 'शुरू करें', saving: 'सेव हो रहा है…',
@@ -59,7 +59,7 @@ export const translations = {
   },
   en: {
     appName: 'School Chat', tagline: 'Stay connected with your group',
-    disclosure: 'This app is admin-monitored: every chat here — your chat with the admin, and chats between any two friends — is visible to the admin. Creating an account means you agree.',
+    disclosure: 'Welcome',
     email: 'Email', password: 'Password', phone: 'Mobile number', optional: 'optional',
     name: 'Real name', nameRequired: 'Please enter your real name.', continueBtn: 'Continue', pleaseWait: 'Please wait…',
     back: 'Back', start: 'Get started', saving: 'Saving…',
