@@ -979,7 +979,6 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <div className="overlay" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
         <PanelHeader title={t('settings')} onBack={onClose} />
-        <p className="disclosure small">{t('disclosure')}</p>
         <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
         <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
         {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
