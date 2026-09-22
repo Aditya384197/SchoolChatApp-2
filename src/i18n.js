@@ -4,7 +4,7 @@
 export const translations = {
   hi: {
     appName: 'School Chat', tagline: 'अपने समूह से जुड़े रहें',
-    disclosure: 'Welcome',
+    disclosure: 'यह ऐप एडमिन-मॉनिटर्ड है: इस ऐप में होने वाली सभी चैट — आपकी एडमिन से बातचीत और आपस में दो दोस्तों की चैट भी — एडमिन को दिखती हैं। खाता बनाकर आप इससे सहमत हैं।',
     email: 'ईमेल', password: 'पासवर्ड', phone: 'मोबाइल नंबर', optional: 'वैकल्पिक',
     name: 'वास्तविक नाम', nameRequired: 'अपना वास्तविक नाम भरें।', continueBtn: 'आगे बढ़ें', pleaseWait: 'कृपया प्रतीक्षा करें…',
     back: 'वापस', start: 'शुरू करें', saving: 'सेव हो रहा है…',
@@ -32,7 +32,7 @@ export const translations = {
     findById: 'आईडी से ढूंढें', yourId: 'आपकी यूज़र आईडी', shareIdHint: 'यह आईडी दोस्तों को भेजें — वो इसी से आपको ढूंढ पाएंगे। बिना आईडी के कोई आपको ऐप में नहीं देख सकता।',
     enterFriendId: 'दोस्त की यूज़र आईडी डालें (जैसे SC-AB12CD)', find: 'ढूंढें', notFound: 'यह आईडी नहीं मिली — ध्यान से दोबारा डालें।', foundAdded: 'मिल गया! टैप करके चैट शुरू करें।',
     block: 'ब्लॉक करें', unblock: 'अनब्लॉक करें', chatMenu: 'मेन्यू', clearChat: 'चैट साफ़ करें', chatLock: 'चैट लॉक',
-    clearChatConfirm: 'यह पूरी चैट हमेशा के लिए मिटा देगा (दोनों तरफ़ से)। पक्का?', yes: 'हाँ', chatLockOn: 'चालू', chatLockOff: 'बंद',
+    clearChatConfirm: 'यह पूरी चैट हमेशा के लिए मिटा देगा (दोनों तरफ़ से)। पक्का?', yes: 'हाँ', chatLockOn: 'चालू', chatLockOff: 'बंद', slowConnection: 'इंटरनेट धीमा लग रहा है…',
     // Profile edit
     editProfile: 'प्रोफ़ाइल एडिट करें', save: 'सेव करें', emailLoginIdHint: 'लॉगिन आईडी, बदला नहीं जा सकता',
     // Chat / messages
@@ -59,7 +59,7 @@ export const translations = {
   },
   en: {
     appName: 'School Chat', tagline: 'Stay connected with your group',
-    disclosure: 'Welcome',
+    disclosure: 'This app is admin-monitored: every chat here — your chat with the admin, and chats between any two friends — is visible to the admin. Creating an account means you agree.',
     email: 'Email', password: 'Password', phone: 'Mobile number', optional: 'optional',
     name: 'Real name', nameRequired: 'Please enter your real name.', continueBtn: 'Continue', pleaseWait: 'Please wait…',
     back: 'Back', start: 'Get started', saving: 'Saving…',
@@ -86,7 +86,7 @@ export const translations = {
     findById: 'Find by ID', yourId: 'Your user ID', shareIdHint: "Share this ID with friends -- it's how they find you. Without it, nobody can see you in the app.",
     enterFriendId: "Enter a friend's user ID (e.g. SC-AB12CD)", find: 'Find', notFound: 'ID not found — check it and try again.', foundAdded: "Found! Tap to start chatting.",
     block: 'Block', unblock: 'Unblock', chatMenu: 'Menu', clearChat: 'Clear chat', chatLock: 'Chat lock',
-    clearChatConfirm: 'This permanently deletes the whole chat (both sides). Sure?', yes: 'Yes', chatLockOn: 'On', chatLockOff: 'Off',
+    clearChatConfirm: 'This permanently deletes the whole chat (both sides). Sure?', yes: 'Yes', chatLockOn: 'On', chatLockOff: 'Off', slowConnection: 'Your connection looks slow…',
     editProfile: 'Edit profile', save: 'Save', emailLoginIdHint: "your login ID, can't be changed",
     online2: 'Online', selectedCount: 'selected', selectAll: 'Select all', copy: 'Copy',
     copied: 'Copied', share: 'Share', delete: 'Delete', confirmDelete: 'Cancel',

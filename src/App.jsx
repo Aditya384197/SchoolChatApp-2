@@ -719,7 +719,7 @@ function AppShell({ me, profile }) {
 
   if (isAdmin && view === 'admin') {
     return (
-      <div className="screen">
+      <div className="screen slide-screen">
         <header className="topbar">
           <button className="icon" onClick={() => setView('chats')}><ArrowLeft /></button>
           <div className="brand-line"><ShieldCheck /><div><b>Admin Dashboard</b><small>{profile.name}</small></div></div>
@@ -733,10 +733,10 @@ function AppShell({ me, profile }) {
   return (
     <div className="screen">
       <header className="topbar">
-        <button className="brand-line as-button" onClick={() => setSettings(true)}>
+        <div className="brand-line">
           <Avatar user={profile} size="sm" />
-          <div><b>School Chat</b></div>
-        </button>
+          <div><b>{t('appName')}</b></div>
+        </div>
         <button className="icon settings-icon" onClick={() => setSettings(true)}>
           <SettingsIcon />{totalUnread > 0 && <span className="badge">{totalUnread > 99 ? '99+' : totalUnread}</span>}
         </button>
@@ -754,8 +754,7 @@ function AppShell({ me, profile }) {
 
         <div className="section-title"><h3>{t('yourContacts')}</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} {t('online')}</span></div>
         {filtered.map(u => {
-          const preview = previews[chatIdFor(me.uid, u.uid)];
-          const subtitle = preview ? `${preview.mine ? t('youPrefix') : ''}${preview.text}` : (u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang));
+          const subtitle = u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang);
           return (
             <ContactRow key={u.uid} u={u} subtitle={subtitle} statusUids={statusUids}
               unread={unread[chatIdFor(me.uid, u.uid)]}
@@ -922,6 +921,7 @@ function ProfileEditPanel({ me, profile, onClose }) {
 function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, hasMyStatus }) {
   const { t, lang, setLang, theme, setTheme } = usePrefs();
   const [panel, setPanel] = useState('main');
+  const [loggingOut, setLoggingOut] = useState(false);
   const panelRef = useRef(panel);
   useEffect(() => { panelRef.current = panel; }, [panel]);
   const backHandler = useRef(() => {
@@ -971,7 +971,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <b>{t('logoutConfirmTitle')}</b>
     <div className="step-actions" style={{ width: '100%', maxWidth: 260 }}>
       <button className="secondary" onClick={() => setPanel('main')}>{t('cancel')}</button>
-      <button className="primary" onClick={logout}>{t('logout')}</button>
+      <button className="primary" disabled={loggingOut} onClick={() => { setLoggingOut(true); logout(); }}>{loggingOut ? t('pleaseWait') : t('logout')}</button>
     </div>
   </div></div>;
 
@@ -979,6 +979,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <div className="overlay" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
         <PanelHeader title={t('settings')} onBack={onClose} />
+        <p className="disclosure small">{t('disclosure')}</p>
         <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
         <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
         {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
@@ -1036,7 +1037,7 @@ function AdminPanel({ users, me }) {
 
   if (selectedChat) {
     return (
-      <div className="screen">
+      <div className="screen slide-screen">
         <header className="topbar">
           <button className="icon" onClick={() => setSelectedChat(null)}><ArrowLeft /></button>
           <b className="grow">{chatLabel(selectedChat)}</b>
@@ -1097,12 +1098,20 @@ function AdminPanel({ users, me }) {
 
 export default function App() {
   const { t } = usePrefs();
+  const [slowHint, setSlowHint] = useState(false);
   const [me, setMe] = useState(null);
   const [profile, setProfile] = useState(null);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [bannedMsg, setBannedMsg] = useState('');
   const [exitToast, setExitToast] = useState(false);
+  const isWaiting = loading || (me && !profileLoaded);
+
+  useEffect(() => {
+    if (!isWaiting) { setSlowHint(false); return undefined; }
+    const timer = setTimeout(() => setSlowHint(true), 3500);
+    return () => clearTimeout(timer);
+  }, [isWaiting]);
 
   useEffect(() => {
     initNativeBack();
@@ -1130,17 +1139,26 @@ export default function App() {
     function attach() {
       if (settled) return;
       settled = true;
-      unsub = onAuthStateChanged(auth, async user => {
-        if (user && await isBanned(user.uid)) {
-          await logout().catch(() => {});
-          setBannedMsg(t('bannedMessage'));
-          setMe(null); setProfile(null); setProfileLoaded(true); setLoading(false);
-          return;
-        }
+      unsub = onAuthStateChanged(auth, user => {
         setMe(user);
         if (user) {
           setProfileLoaded(false);
           onValue(ref(db, `users/${user.uid}`), s => { setProfile(s.val()); setProfileLoaded(true); });
+          // The ban check is a network round-trip (get(), not a cached
+          // listener) -- awaiting it here used to block the very first
+          // render on every cold start, and on a slow/still-connecting
+          // network that could take many seconds. That was the real cause
+          // of the app intermittently taking 10-20s to open. It now runs
+          // in the background instead: the app renders immediately, and a
+          // banned person is signed back out the moment this resolves,
+          // rather than everyone waiting on it every single time.
+          isBanned(user.uid).then(banned => {
+            if (banned) {
+              logout().catch(() => {});
+              setBannedMsg(t('bannedMessage'));
+              setMe(null); setProfile(null); setProfileLoaded(true);
+            }
+          }).catch(() => {});
         } else {
           setProfile(null);
           setProfileLoaded(true);
@@ -1163,7 +1181,7 @@ export default function App() {
       </div>
     );
   } else if (loading) {
-    content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span></div>;
+    content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span>{slowHint && <small className="slow-hint">{t('slowConnection')}</small>}</div>;
   } else if (!me) {
     content = <AuthScreen bannedMsg={bannedMsg} />;
   } else if (!profileLoaded) {
@@ -1172,7 +1190,7 @@ export default function App() {
     // flashing the phone-number step of registration at an already fully
     // registered person (that flash was the "asking for a number, then
     // auto-continuing" glitch).
-    content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span></div>;
+    content = <div className="splash"><img src="/school-chat-icon.png" alt={t('appName')} /><span>{t('appName')}</span>{slowHint && <small className="slow-hint">{t('slowConnection')}</small>}</div>;
   } else if (!profile) {
     content = <CompleteProfileScreen me={me} />;
   } else {

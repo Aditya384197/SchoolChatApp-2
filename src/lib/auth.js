@@ -132,9 +132,18 @@ export async function login(email, password) {
 }
 
 export async function logout() {
+  // Mark offline is best-effort only -- if this write hangs or fails (e.g.
+  // no connectivity right at that moment), signing out must still happen.
+  // Previously this was awaited unguarded, so a slow/failed write could
+  // silently block sign-out entirely (tapping "yes" appeared to do nothing).
   if (auth.currentUser) {
-    await set(ref(db, `users/${auth.currentUser.uid}/online`), false);
+    set(ref(db, `users/${auth.currentUser.uid}/online`), false).catch(() => {});
   }
   localStorage.removeItem('schoolChatVerified');
-  return signOut(auth);
+  // Bounded too, for the same reason -- signOut() is normally fast and
+  // local, but never let a stuck network call make "Yes" feel broken.
+  await Promise.race([
+    signOut(auth),
+    new Promise(resolve => setTimeout(resolve, 4000)),
+  ]);
 }
