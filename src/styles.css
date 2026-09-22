@@ -122,7 +122,7 @@
 .status-row{display:flex;align-items:center;gap:12px;padding:10px 4px 16px;margin-bottom:4px;border-bottom:1px solid #eef2f7}
 .status-avatar-btn{position:relative;background:none;border:none;flex-shrink:0}
 .status-plus{position:absolute;right:-2px;bottom:-2px;width:18px;height:18px;border-radius:50%;background:#0f6fe8;color:#fff;font-size:13px;display:grid;place-items:center;border:2px solid #fff}
-.avatar-wrap.has-status,.status-avatar-btn.has-status{border-radius:50%;box-shadow:0 0 0 3px #22c55e,0 0 0 5px #fff}
+.avatar-wrap.has-status,.status-avatar-btn.has-status{border-radius:50%;box-shadow:0 0 0 2px #fff,0 0 0 3.3px #22c55e}
 .avatar-wrap{background:none;border:none;padding:0}
 .status-viewer{position:fixed;inset:0;background:#000;z-index:120;display:flex;flex-direction:column;color:#fff}
 .status-bars{display:flex;gap:4px;padding:8px 8px 0}
@@ -200,11 +200,19 @@ button,.user-row,.setting-row,.monitor-row,.icon,.avatar-shell,.status-avatar-bt
    navigating to a new settings panel on tap) -- that lingering
    transition was the actual cause of the wrong icon appearing
    pressed. No opacity, no scale, no glow. */
-button:active:not(:disabled),.user-row:active,.setting-row:active,.monitor-row:active,
-.icon:active,.avatar-shell:active,.status-avatar-btn:active,.avatar-wrap:active{
+button:active:not(:disabled):not(.icon),.user-row:active,.setting-row:active,.monitor-row:active,
+.avatar-shell:active,.status-avatar-btn:active,.avatar-wrap:active{
   background-color:rgba(15,23,42,.07);
   transition:none
 }
+/* Icon buttons that navigate (back arrows etc.) use a JS-driven .pressed
+   class instead of :active -- see PanelHeader -- since :active can get
+   stuck on a freshly-mounted replacement element in this WebView. Icon
+   buttons that don't navigate (settings gear, chat menu) keep plain
+   :active, which is fine since they don't swap the DOM out from under the
+   touch. */
+.icon:active{background-color:rgba(15,23,42,.07);transition:none}
+.icon.pressed{background-color:rgba(15,23,42,.07)}
 .id-row{display:flex;gap:8px;align-items:center}
 .id-row input{flex:1;font-weight:800;letter-spacing:.5px}
 .id-row button{flex-shrink:0;padding:10px 14px}
@@ -235,3 +243,18 @@ button:active:not(:disabled),.user-row:active,.setting-row:active,.monitor-row:a
 .msg-actions{animation:fadeIn .15s ease-out}
 .slide-screen{animation:slideInRight .22s cubic-bezier(.22,.9,.32,1)}
 .slow-hint{color:#94a3b8;font-weight:400;font-size:12px;margin-top:6px}
+/* Message bubble entrance: a sent message feels like it rises up from the
+   composer/keyboard and settles into place; an incoming one feels like it
+   pops open from a corner, like a bubble inflating. Timing kept brisk
+   (~260ms) so it reads as responsive, not showy. */
+@keyframes bubbleRiseIn{
+  0%{opacity:0;transform:translateY(26px) scale(.75)}
+  100%{opacity:1;transform:translateY(0) scale(1)}
+}
+@keyframes bubblePopIn{
+  0%{opacity:0;transform:scale(.15)}
+  70%{opacity:1;transform:scale(1.04)}
+  100%{opacity:1;transform:scale(1)}
+}
+.bubble-enter-mine{animation:bubbleRiseIn .26s cubic-bezier(.22,.9,.32,1.1)}
+.bubble-enter-theirs{animation:bubblePopIn .28s cubic-bezier(.22,.9,.32,1.1);transform-origin:left bottom}

@@ -45,9 +45,23 @@ function formatLastSeen(ts, t, lang) {
 // arrow always on the left, centred title, balanced empty space on the
 // right (never a cross/X for "go back one step").
 function PanelHeader({ title, onBack }) {
+  // Deliberately not relying on CSS :active here: when tapping this button
+  // navigates to a new panel, the old button unmounts and a brand new back
+  // button mounts at the same screen position -- in this WebView the new
+  // element could inherit a "stuck" active/pressed state that never clears
+  // since it never got its own matching pointer-down. A React-driven class,
+  // always starting clean on every fresh mount, can't get stuck that way.
+  const [pressed, setPressed] = useState(false);
   return (
     <div className="panel-header">
-      <button className="icon" onClick={onBack}><ArrowLeft /></button>
+      <button
+        className={`icon${pressed ? ' pressed' : ''}`}
+        onClick={onBack}
+        onPointerDown={() => setPressed(true)}
+        onPointerUp={() => setPressed(false)}
+        onPointerLeave={() => setPressed(false)}
+        onPointerCancel={() => setPressed(false)}
+      ><ArrowLeft /></button>
       <b className="panel-header-title">{title}</b>
       <span className="panel-header-spacer" />
     </div>
@@ -240,7 +254,7 @@ function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, select
   }
   return (
     <div
-      className={`bubble ${mine ? 'mine' : 'theirs'} ${selected ? 'selected' : ''}`}
+      className={`bubble ${mine ? 'mine bubble-enter-mine' : 'theirs bubble-enter-theirs'} ${selected ? 'selected' : ''}`}
       onClick={tap}
       onPointerDown={start} onPointerUp={stop} onPointerLeave={stop}
       onContextMenu={e => { e.preventDefault(); onLongPress(message); }}
