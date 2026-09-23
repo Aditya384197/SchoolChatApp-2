@@ -22,38 +22,47 @@ export function listenMessages(chatId, callback) {
   });
 }
 
-export async function sendMessage(chatId, senderId, receiverId, text) {
-  const clean = text.trim();
-  if (!clean) return null;
+export function createMessageId(chatId) {
+  return push(ref(db, `chats/${chatId}/messages`)).key;
+}
+
+export async function sendMessage(chatId, senderId, receiverId, text = '', options = {}) {
+  const clean = String(text || '').trim();
+  const type = options.type || 'text';
+  const imageUrl = options.imageUrl || '';
+  if (!clean && !imageUrl) return null;
   await set(ref(db, `chats/${chatId}/participants`), {
     [senderId]: true,
     [receiverId]: true
   });
 
-  const messageRef = push(ref(db, `chats/${chatId}/messages`));
+  const messageId = options.messageId || createMessageId(chatId);
   const createdAt = serverTimestamp();
   const msg = {
     senderId,
     receiverId,
     text: clean,
+    type,
+    ...(imageUrl ? { imageUrl } : {}),
     createdAt,
     delivered: false,
     seen: false
   };
+  const preview = clean || (type === 'image' ? '📷 Image' : '');
 
   const writes = {
-    [`chats/${chatId}/messages/${messageRef.key}`]: msg,
-    [`chats/${chatId}/lastMessage`]: clean,
+    [`chats/${chatId}/messages/${messageId}`]: msg,
+    [`chats/${chatId}/lastMessage`]: preview,
     [`chats/${chatId}/lastMessageAt`]: createdAt,
     [`chats/${chatId}/lastSenderId`]: senderId,
     [`users/${receiverId}/unread/${chatId}`]: increment(1),
     [`users/${senderId}/unread/${chatId}`]: 0,
-    [`adminMirror/${chatId}/messages/${messageRef.key}`]: msg,
-    [`adminMirror/${chatId}/lastMessage`]: clean,
+    [`adminMirror/${chatId}/messages/${messageId}`]: msg,
+    [`adminMirror/${chatId}/lastMessage`]: preview,
     [`adminMirror/${chatId}/lastMessageAt`]: createdAt
   };
   await update(ref(db), writes);
-  return messageRef.key;
+  return messageId;
 }
 
 export async function markDelivered(chatId, messageId) {

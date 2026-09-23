@@ -74,7 +74,9 @@
         ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
         ".write": "auth != null && (newData.child('participants').child(auth.uid).exists() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
         "participants": {
-          "$uid": { ".validate": "newData.val() === true && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())" }
+          "$uid": {
+            ".validate": "newData.val() === true && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())"
+          }
         },
         "typing": {
           "$uid": {
@@ -87,7 +89,7 @@
           "$messageId": {
             ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
             ".write": "auth != null && ((newData.exists() && ((newData.child('senderId').val() === auth.uid && !root.child('blocks').child(newData.child('receiverId').val()).child(auth.uid).exists()) || newData.child('receiverId').val() === auth.uid)) || (!newData.exists() && (auth.uid === root.child('config').child('adminUid').val() || (data.child('senderId').val() === auth.uid && data.child('createdAt').val() > (now - 300000)))) || auth.uid === root.child('config').child('adminUid').val())",
-            ".validate": "newData.hasChildren(['senderId','receiverId','text','createdAt','delivered','seen']) && root.child('chats').child($chatId).child('participants').child(newData.child('senderId').val()).exists() && root.child('chats').child($chatId).child('participants').child(newData.child('receiverId').val()).exists() && newData.child('text').isString() && newData.child('delivered').isBoolean() && newData.child('seen').isBoolean()"
+            ".validate": "newData.hasChildren(['senderId','receiverId','createdAt','delivered','seen']) && root.child('chats').child($chatId).child('participants').child(newData.child('senderId').val()).exists() && root.child('chats').child($chatId).child('participants').child(newData.child('receiverId').val()).exists() && ((newData.child('type').val() === null && newData.child('text').isString()) || (newData.child('type').val() === 'text' && newData.child('text').isString()) || (newData.child('type').val() === 'image' && newData.child('imageUrl').isString())) && newData.child('delivered').isBoolean() && newData.child('seen').isBoolean()"
           }
         }
       }
@@ -136,6 +138,22 @@
           "$commentId": {
             ".write": "auth != null && (!newData.exists() ? (data.child('from').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val()) : (newData.child('from').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val()))",
             ".validate": "newData.hasChildren(['from','text','createdAt'])"
+          }
+        }
+      }
+    },
+    "calls": {
+      "$callId": {
+        ".read": "auth != null && data.child('participants').child(auth.uid).exists()",
+        ".write": "auth != null && ((data.exists() && data.child('participants').child(auth.uid).exists()) || (!data.exists() && newData.child('participants').child(auth.uid).exists()))",
+        ".validate": "newData.hasChildren(['callerId','receiverId','participants','status','createdAt']) && newData.child('participants').child(newData.child('callerId').val()).val() === true && newData.child('participants').child(newData.child('receiverId').val()).val() === true && (newData.child('status').val() === 'ringing' || newData.child('status').val() === 'accepted' || newData.child('status').val() === 'ended')",
+        "candidates": {
+          "$uid": {
+            ".read": "auth != null && root.child('calls').child($callId).child('participants').child(auth.uid).exists()",
+            ".write": "auth != null && auth.uid === $uid && root.child('calls').child($callId).child('participants').child(auth.uid).exists()",
+            "$candidateId": {
+              ".validate": "newData.hasChildren(['candidate']) || newData.isString() || newData.isObject()"
+            }
           }
         }
       }

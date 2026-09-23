@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref } from 'firebase/database';
 import {
-  ArrowLeft, MessageCircle, Search, Send,
+  ArrowLeft, MessageCircle, Search, Send, Phone, PhoneOff, Mic, MicOff, ImagePlus,
   ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare,
   Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon,
   Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock
@@ -10,10 +10,10 @@ import {
 import { auth, db, firebaseInitError } from './firebase';
 import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile } from './lib/auth';
 import {
-  chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage,
+  chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage, createMessageId,
   deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS, clearChat
 } from './lib/chat';
-import { getPhoneContacts, matchAndSaveContacts } from './lib/contacts';
+import { getPhoneContacts, matchAndSaveContacts, normalizePhone } from './lib/contacts';
 import { listenKnownContacts, addKnownContact, removeKnownContact, blockUser, unblockUser, findByCode, findByEmail } from './lib/directory';
 import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
@@ -23,10 +23,11 @@ import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, cha
 import { usePrefs } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus } from './lib/status';
-import { uploadStatusMedia } from './lib/media';
+import { uploadStatusMedia, uploadChatImage, deleteChatImage } from './lib/media';
 import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
+import { useVoiceCall } from './lib/calls';
 
 function formatLastSeen(ts, t, lang) {
   const tr = t || ((k) => k);
@@ -81,26 +82,30 @@ function StepDots({ step, total = 3 }) {
 // Steps 2 (phone) + 3 (profile: name/avatar/photo) — shared by a fresh
 // registration (after step 1 creates the account) and by someone resuming
 // an interrupted sign-up (account already exists, profile doesn't yet).
-function ProfileSteps({ identity, onDone }) {
+function ProfileSteps({ identity, initialPhone = '', onDone }) {
   const { t } = usePrefs();
-  const [step, setStep] = useState(2);
-  const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [avatar, setAvatar] = useState(AVATARS[0]);
   const [photoUrl, setPhotoUrl] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const savedPhone = initialPhone || localStorage.getItem('schoolChatPendingPhone') || '';
 
-  async function finish(e) {
-    e.preventDefault();
-    if (!name.trim()) { setError(t('nameRequired')); return; }
+  async function finish(skip = false) {
+    const chosenName = name.trim() || (identity.email || '').split('@')[0] || 'Student';
+    if (!skip && !name.trim()) { setError(t('nameRequired')); return; }
     setError(''); setBusy(true);
     try {
-      await completeRegistration({ uid: identity.uid, email: identity.email, name, phone, avatar, photoUrl });
-      // Ask for the contacts permission right away and match quietly in the
-      // background — nothing about this is shown; it just means friends who
-      // are already in the app show up naturally once matched.
-      getPhoneContacts().catch(() => {});
+      await completeRegistration({
+        uid: identity.uid,
+        email: identity.email,
+        name: chosenName,
+        phone: savedPhone,
+        requirePhone: identity.requirePhone ?? Boolean(savedPhone),
+        avatar,
+        photoUrl: skip ? '' : photoUrl,
+      });
+      localStorage.removeItem('schoolChatPendingPhone');
       onDone?.();
     } catch (e) {
       setError(e.message || t('start'));
@@ -109,58 +114,53 @@ function ProfileSteps({ identity, onDone }) {
     }
   }
 
-  if (step === 2) {
-    return (
-      <section className="card auth-card">
-        <StepDots step={2} />
-        <h1>{t('phone')}</h1>
-        <p className="muted">{t('phoneHint')}</p>
-        <label>{t('phone')} <span className="optional">({t('optional')})</span><input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoFocus /></label>
-        <button className="primary" onClick={() => setStep(3)}>{t('continueBtn')}</button>
-      </section>
-    );
-  }
-
   return (
     <section className="card auth-card">
-      <StepDots step={3} />
+      <StepDots step={2} total={2} />
       <h1>{t('buildProfile')}</h1>
-      <form onSubmit={finish}>
-        <label>{t('name')}<input value={name} onChange={e => setName(e.target.value)} required autoFocus /></label>
+      <p className="muted auth-center-note">{t('profileOptionalHint')}</p>
+      <form onSubmit={e => { e.preventDefault(); finish(false); }}>
+        <label>{t('name')}<input value={name} onChange={e => setName(e.target.value)} autoFocus /></label>
         <p className="muted small">{t('addPhoto')} <span className="optional">({t('optional')})</span></p>
         <PhotoPicker photoUrl={photoUrl} onChange={setPhotoUrl} />
         <p className="muted small">{t('chooseAvatar')}</p>
-        <AvatarPicker selected={avatar} onSelect={setAvatar} />
+        <AvatarPicker selected={avatar} onSelect={a => { setAvatar(a); setPhotoUrl(''); }} />
         {error && <div className="error">{error}</div>}
         <div className="step-actions">
-          <button type="button" className="secondary" onClick={() => setStep(2)}>{t('back')}</button>
-          <button className="primary" disabled={busy}>{busy ? t('saving') : t('start')}</button>
+          <button type="button" className="secondary" onClick={() => finish(true)} disabled={busy}>{t('skipForNow')}</button>
+          <button className="primary" disabled={busy}>{busy ? t('saving') : t('saveAndStart')}</button>
         </div>
       </form>
     </section>
   );
 }
 
-// Step 1: credentials. Creates the Firebase Auth account (and silently
-// resolves admin status -- see adminAccess.js), then hands off to
-// ProfileSteps.
-function RegisterWizard() {
+function RegisterWizard({ onSwitch }) {
   const { t } = usePrefs();
   const [identity, setIdentity] = useState(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  if (identity) return <ProfileSteps identity={identity} />;
+  if (identity) return <ProfileSteps identity={identity} initialPhone={phone} />;
 
   async function submit(e) {
     e.preventDefault();
-    setError(''); setBusy(true);
+    setError('');
+    const normalized = normalizePhone(phone);
+    if (normalized.length !== 10) {
+      setError(t('validPhoneError'));
+      return;
+    }
+    setBusy(true);
+    localStorage.setItem('schoolChatPendingPhone', phone);
     try {
-      const result = await beginRegistration(email, password);
-      setIdentity(result);
+      const result = await beginRegistration(email, password, phone);
+      setIdentity({ ...result, phone, requirePhone: true });
     } catch (e) {
+      localStorage.removeItem('schoolChatPendingPhone');
       setError(e.message || t('pleaseWait'));
     } finally {
       setBusy(false);
@@ -170,15 +170,18 @@ function RegisterWizard() {
   return (
     <section className="card auth-card">
       <img className="brand-image" src="/school-chat-icon.png" alt={t('appName')} />
-      <h1>{t('appName')}</h1>
-      <StepDots step={1} />
+      <h1>{t('newAccount')}</h1>
+      <StepDots step={1} total={2} />
       <p className="disclosure">{t('disclosure')}</p>
       <form onSubmit={submit}>
-        <label>{t('email')}<input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></label>
-        <label>{t('password')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength="6" required /></label>
+        <label>{t('email')}<input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" /></label>
+        <label>{t('password')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength="6" required autoComplete="new-password" /></label>
+        <label>{t('phone')}<input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder={t('phonePlaceholder')} required /></label>
+        <p className="muted small form-hint">{t('phoneHint')}</p>
         {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? t('pleaseWait') : t('continueBtn')}</button>
+        <button className="primary" disabled={busy}>{busy ? t('pleaseWait') : t('createAccount')}</button>
       </form>
+      <button className="link" onClick={onSwitch}>{t('haveAccount')}</button>
     </section>
   );
 }
@@ -225,7 +228,7 @@ function AuthScreen({ bannedMsg }) {
     <main className="auth">
       {bannedMsg && <div className="error banned-banner">{bannedMsg}</div>}
       {mode === 'register'
-        ? <RegisterWizard />
+        ? <RegisterWizard onSwitch={() => setMode('login')} />
         : <LoginForm onSwitch={() => setMode('register')} />}
       {mode === 'login' && <button className="link outside" onClick={() => setMode('register')}>{t('noAccount')}</button>}
     </main>
@@ -259,7 +262,8 @@ function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, select
       onPointerDown={start} onPointerUp={stop} onPointerLeave={stop}
       onContextMenu={e => { e.preventDefault(); onLongPress(message); }}
     >
-      <div>{message.text}</div>
+      {message.imageUrl && <img className="message-image" src={message.imageUrl} alt="" loading="lazy" />}
+      {message.text && <div>{message.text}</div>}
       <div className="message-meta">
         <span>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString('hi-IN', { hour: '2-digit', minute: '2-digit' }) : '…'}</span>
         {mine && <span className={`ticks ${message.seen ? 'seen' : ''}`}>{message.delivered ? '✓✓' : '✓'}</span>}
@@ -283,7 +287,7 @@ function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDelet
   );
 }
 
-function ChatMenu({ me, user, chatId, onClose, onBlocked }) {
+function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
   const { t } = usePrefs();
   useBackHandler(onClose);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -295,6 +299,7 @@ function ChatMenu({ me, user, chatId, onClose, onBlocked }) {
     onBlocked?.();
   }
   async function doClear() {
+    await Promise.all(messages.filter(m => m.imageUrl).map(m => deleteChatImage(m.senderId, chatId, m.id).catch(() => {})));
     await clearChat(chatId);
     setConfirmClear(false);
     onClose();
@@ -334,14 +339,17 @@ function ChatMenu({ me, user, chatId, onClose, onBlocked }) {
   );
 }
 
-function Chat({ me, user, onBack }) {
+function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const { t, lang } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
   const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
   const [typingUsers, setTypingUsers] = useState({});
   const [sending, setSending] = useState(false);
+  const [imageError, setImageError] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showDeleteSheet, setShowDeleteSheet] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
@@ -351,6 +359,7 @@ function Chat({ me, user, onBack }) {
   const inputRef = useRef(null);
   const typingTimer = useRef(null);
   const typingActive = useRef(false);
+  const imageInputRef = useRef(null);
   const selectionMode = selectedIds.size > 0;
 
   function clearSelection() { setSelectedIds(new Set()); }
@@ -397,25 +406,55 @@ function Chat({ me, user, onBack }) {
     }
   }
 
+  useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
+
+  function pickChatImage(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+    setImageError('');
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  }
+
+  function clearChatImage() {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(null);
+    setImagePreview('');
+    setImageError('');
+  }
+
   async function submit(e) {
     e.preventDefault();
     const value = text.trim();
-    if (!value || sending) return;
+    if ((!value && !imageFile) || sending) return;
     setSending(true);
+    setImageError('');
     setText('');
     clearTimeout(typingTimer.current);
     typingActive.current = false;
     setTyping(chatId, me.uid, false).catch(() => {});
-    // Realtime Database queues writes locally and resolves this promise
-    // only once it reaches the server -- while offline that can hang for a
-    // long time. The local cache (and this chat's own message listener)
-    // already reflects the message immediately regardless, so don't block
-    // the composer on the network round-trip; it'll sync in the background
-    // once connectivity returns.
-    sendMessage(chatId, me.uid, user.uid, value).catch(() => {});
+
+    if (imageFile) {
+      const file = imageFile;
+      const messageId = createMessageId(chatId);
+      clearChatImage();
+      try {
+        const imageUrl = await uploadChatImage(me.uid, chatId, messageId, file);
+        await sendMessage(chatId, me.uid, user.uid, value, { type: 'image', imageUrl, messageId });
+      } catch (error) {
+        setImageError(error?.message || t('imageSendFailed'));
+        setText(value);
+        setSending(false);
+        setImageFile(file); setImagePreview(URL.createObjectURL(file));
+        return;
+      }
+    } else {
+      sendMessage(chatId, me.uid, user.uid, value).catch(() => {});
+    }
     setSending(false);
-    // Keep the keyboard open for the next message instead of it dropping
-    // away after every send.
     inputRef.current?.focus();
   }
 
@@ -437,7 +476,7 @@ function Chat({ me, user, onBack }) {
     setSelectedIds(allSelected ? new Set() : new Set(visibleMessages.map(m => m.id)));
   }
   function joinedText() {
-    return [...selectedMsgs].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map(m => m.text).join('\n');
+    return [...selectedMsgs].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).map(m => m.text || (m.imageUrl ? '[Image]' : '')).filter(Boolean).join('\n');
   }
   async function copySelected() {
     try {
@@ -459,7 +498,11 @@ function Chat({ me, user, onBack }) {
     setShowDeleteSheet(false); clearSelection();
   }
   async function deleteForEveryoneBulk() {
-    await Promise.all([...selectedIds].map(id => deleteMessageForEveryone(chatId, id)));
+    const selected = visibleMessages.filter(m => selectedIds.has(m.id));
+    await Promise.all(selected.map(async m => {
+      if (m.imageUrl) await deleteChatImage(m.senderId, chatId, m.id).catch(() => {});
+      await deleteMessageForEveryone(chatId, m.id);
+    }));
     setShowDeleteSheet(false); clearSelection();
   }
 
@@ -494,12 +537,13 @@ function Chat({ me, user, onBack }) {
             <small>{user.online ? t('online2') : formatLastSeen(user.lastSeen, t, lang)}</small>
             {otherTyping && <span className="typing-label">{t('typing')}</span>}
           </div>
+          <button className="icon call-icon" onClick={() => onStartVoiceCall?.(user)} title={t('voiceCall')} disabled={callBusy}><Phone size={21} /></button>
           <button className="icon" onClick={() => setShowChatMenu(true)} title={t('chatMenu')}><MoreVertical /></button>
         </header>
       )}
       {showChatMenu && (
         <ChatMenu
-          me={me} user={user} chatId={chatId} onClose={() => setShowChatMenu(false)}
+          me={me} user={user} chatId={chatId} messages={messages} onClose={() => setShowChatMenu(false)}
           onBlocked={onBack}
         />
       )}
@@ -514,10 +558,19 @@ function Chat({ me, user, onBack }) {
         ))}
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
+      {imageError && <div className="error chat-image-error">{imageError}</div>}
+      {imagePreview && (
+        <div className="chat-attachment-preview">
+          <img src={imagePreview} alt="" />
+          <button type="button" className="icon" onClick={clearChatImage} title={t('removePhoto')}><X size={18} /></button>
+        </div>
+      )}
       <form className="composer" onSubmit={submit}>
+        <button type="button" className="icon attach-btn" onClick={() => imageInputRef.current?.click()} title={t('sendImage')} disabled={sending}><ImagePlus size={21} /></button>
         <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder={t('messagePlaceholder')} />
         <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
+      <input ref={imageInputRef} type="file" hidden accept="image/*" capture="environment" onChange={pickChatImage} />
       {showDeleteSheet && (
         <BulkDeleteSheet
           canDeleteForEveryone={canDeleteForEveryone}
@@ -576,6 +629,69 @@ function ContactActionSheet({ user, me, onClose }) {
   );
 }
 
+function CallAvatar({ user }) {
+  return <Avatar user={user} size="lg" />;
+}
+
+function IncomingVoiceCall({ call, onAccept, onDecline }) {
+  const { t } = usePrefs();
+  const peer = call.peer || { uid: call.callerId, name: 'School Chat' };
+  return (
+    <div className="voice-overlay">
+      <div className="voice-card incoming">
+        <Phone size={22} className="voice-top-icon" />
+        <CallAvatar user={peer} />
+        <b className="voice-name">{peer.name}</b>
+        <span className="voice-status">{t('incomingVoiceCall')}</span>
+        <div className="voice-actions two">
+          <button className="voice-action decline" onClick={() => onDecline(call)}><PhoneOff size={22} /></button>
+          <button className="voice-action accept" onClick={() => onAccept(call)}><Phone size={22} /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) {
+  const { t } = usePrefs();
+  const [elapsed, setElapsed] = useState(0);
+  const audioRef = useRef(null);
+  const startedAt = call.startedAt;
+
+  useEffect(() => {
+    if (!startedAt) { setElapsed(0); return undefined; }
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+    audioRef.current.srcObject = remoteStream || null;
+    if (remoteStream) audioRef.current.play().catch(() => {});
+  }, [remoteStream]);
+
+  const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const secs = String(elapsed % 60).padStart(2, '0');
+  const label = call.status === 'ringing' ? t('calling') : call.status === 'connecting' ? t('connecting') : `${mins}:${secs}`;
+  return (
+    <div className="voice-overlay active-call-overlay">
+      <div className="voice-card active">
+        <Phone size={22} className="voice-top-icon pulse-icon" />
+        <CallAvatar user={call.peer} />
+        <b className="voice-name">{call.peer?.name || t('user')}</b>
+        <span className="voice-status">{label}</span>
+        <audio ref={audioRef} autoPlay playsInline />
+        <div className="voice-actions">
+          <button className={`voice-action secondary-action ${muted ? 'on' : ''}`} onClick={onToggleMute}>{muted ? <MicOff size={21} /> : <Mic size={21} />}<small>{muted ? t('unmute') : t('mute')}</small></button>
+          <button className="voice-action decline" onClick={onHangUp}><PhoneOff size={22} /><small>{t('endCall')}</small></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppShell({ me, profile }) {
   const { t, lang } = usePrefs();
   const [users, setUsers] = useState([]);
@@ -595,6 +711,7 @@ function AppShell({ me, profile }) {
   const [statusUids, setStatusUids] = useState(new Set());
   const [statusOwner, setStatusOwner] = useState(null); // whose status is being viewed
   const [composing, setComposing] = useState(false);
+  const voiceCall = useVoiceCall({ uid: me.uid, users });
 
   // Privacy: a normal user can no longer read the whole /users directory
   // (see database.rules.json) -- only their own "known contacts" (people a
@@ -729,7 +846,34 @@ function AppShell({ me, profile }) {
   const adminUser = users.find(u => u.role === 'admin');
   const isAdmin = profile.role === 'admin';
 
-  if (chatUser) return <Chat me={me} user={chatUser} onBack={() => setChatUser(null)} />;
+  const callUi = (
+    <>
+      {voiceCall.callError && (
+        <div className="call-error-toast" onClick={() => voiceCall.setCallError('')}>{voiceCall.callError}</div>
+      )}
+      {voiceCall.incomingCall && (
+        <IncomingVoiceCall
+          call={voiceCall.incomingCall}
+          onAccept={voiceCall.acceptCall}
+          onDecline={voiceCall.declineCall}
+        />
+      )}
+      {voiceCall.activeCall && (
+        <ActiveVoiceCall
+          call={voiceCall.activeCall}
+          remoteStream={voiceCall.remoteStream}
+          muted={voiceCall.muted}
+          onToggleMute={voiceCall.toggleMute}
+          onHangUp={voiceCall.hangUp}
+        />
+      )}
+    </>
+  );
+
+  if (chatUser) return (<>
+    <Chat me={me} user={chatUser} onBack={() => setChatUser(null)} onStartVoiceCall={voiceCall.startCall} callBusy={Boolean(voiceCall.activeCall || voiceCall.incomingCall)} />
+    {callUi}
+  </>);
 
   if (isAdmin && view === 'admin') {
     return (
@@ -795,6 +939,7 @@ function AppShell({ me, profile }) {
       {statusOwner && <StatusViewer owner={statusOwner} me={me} onClose={() => setStatusOwner(null)} />}
       {composing && <StatusComposer me={me} onClose={() => setComposing(false)} />}
       {isAdmin && <AdminTabBar view={view} setView={setView} />}
+      {callUi}
     </div>
   );
 }
@@ -944,65 +1089,69 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   }).current;
   useBackHandler(backHandler);
 
-  if (panel === 'editProfile') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+  let panelContent;
+  if (panel === 'editProfile') panelContent = <>
     <PanelHeader title={t('editProfile')} onBack={() => setPanel('main')} />
     <ProfileEditPanel me={me} profile={profile} onClose={() => setPanel('main')} />
-  </aside></div>;
-
-  if (panel === 'language') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+  </>;
+  else if (panel === 'language') panelContent = <>
     <PanelHeader title={t('language')} onBack={() => setPanel('main')} />
     <div className="lang-options">
       <button className={lang === 'hi' ? 'active' : ''} onClick={() => { setLang('hi'); setPanel('main'); }}>{t('langHindi')}</button>
       <button className={lang === 'en' ? 'active' : ''} onClick={() => { setLang('en'); setPanel('main'); }}>{t('langEnglish')}</button>
     </div>
-  </aside></div>;
-
-  if (panel === 'theme') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+  </>;
+  else if (panel === 'theme') panelContent = <>
     <PanelHeader title={t('theme')} onBack={() => setPanel('main')} />
     <div className="theme-options">
       <button className={theme === 'light' ? 'active' : ''} onClick={() => { setTheme('light'); setPanel('main'); }}>{t('themeLight')}</button>
       <button className={theme === 'dark' ? 'active' : ''} onClick={() => { setTheme('dark'); setPanel('main'); }}>{t('themeDark')}</button>
       <button className={theme === 'system' ? 'active' : ''} onClick={() => { setTheme('system'); setPanel('main'); }}>{t('themeSystem')}</button>
     </div>
-  </aside></div>;
-
-  if (panel === 'applock') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+  </>;
+  else if (panel === 'applock') panelContent = <>
     <PanelHeader title={t('appLock')} onBack={() => setPanel('main')} />
     <PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} />
     {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>{t('removeAppLock')}</button>}
-  </aside></div>;
-
-  if (panel === 'update') return <div className="overlay" onClick={onClose}><aside className="drawer" onClick={e => e.stopPropagation()}>
+  </>;
+  else if (panel === 'update') panelContent = <>
     <PanelHeader title={t('update')} onBack={() => setPanel('main')} />
     <div className="update-panel">
       <p>{t('currentVersion')}: <b>v{APP_VERSION}</b></p>
       <p className="muted small">{t('updateHint')}</p>
       <button className="primary" onClick={() => window.open(UPDATE_URL, '_blank')}>{t('checkUpdate')}</button>
     </div>
-  </aside></div>;
-
-  if (panel === 'logout') return <div className="overlay" onClick={onClose}><div className="logout-confirm" onClick={e => e.stopPropagation()}>
-    <b>{t('logoutConfirmTitle')}</b>
-    <div className="step-actions" style={{ width: '100%', maxWidth: 260 }}>
-      <button className="secondary" onClick={() => setPanel('main')}>{t('cancel')}</button>
-      <button className="primary" disabled={loggingOut} onClick={() => { setLoggingOut(true); logout(); }}>{loggingOut ? t('pleaseWait') : t('logout')}</button>
+  </>;
+  else if (panel === 'logout') panelContent = <>
+    <PanelHeader title={t('logout')} onBack={() => setPanel('main')} />
+    <div className="logout-confirm inline-logout">
+      <b>{t('logoutConfirmTitle')}</b>
+      <div className="step-actions" style={{ width: '100%', maxWidth: 260 }}>
+        <button className="secondary" onClick={() => setPanel('main')}>{t('cancel')}</button>
+        <button className="primary" disabled={loggingOut} onClick={() => { setLoggingOut(true); logout(); }}>{loggingOut ? t('pleaseWait') : t('logout')}</button>
+      </div>
     </div>
-  </div></div>;
+  </>;
+  else panelContent = <>
+    <PanelHeader title={t('settings')} onBack={onClose} />
+    <div className="settings-main-content">
+      <p className="disclosure small">{t('disclosure')}</p>
+      <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
+      <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
+      {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
+      <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> {t('update')} <span className="row-end status-text">v{APP_VERSION}</span></button>
+      {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> {t('adminDashboardOpen')} <span className="row-end">›</span></button>}
+      <button className="setting-row danger" onClick={() => setPanel('logout')}><LogOut /> {t('logout')}</button>
+    </div>
+  </>;
 
   return (
     <div className="overlay" onClick={onClose}>
       <aside className="drawer" onClick={e => e.stopPropagation()}>
-        <PanelHeader title={t('settings')} onBack={onClose} />
-        <p className="disclosure small">{t('disclosure')}</p>
-        <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
-        <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
-        {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
-        <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
-        <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
-        <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
-        <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> {t('update')} <span className="row-end status-text">v{APP_VERSION}</span></button>
-        {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> {t('adminDashboardOpen')} <span className="row-end">›</span></button>}
-        <button className="setting-row danger" onClick={() => setPanel('logout')}><LogOut /> {t('logout')}</button>
+        <div key={panel} className="settings-panel-view">{panelContent}</div>
       </aside>
     </div>
   );
@@ -1058,7 +1207,7 @@ function AdminPanel({ users, me }) {
         </header>
         <div className="content admin-transcript">
           {logs.length
-            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? t('you') : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>: {m.text}</div>)
+            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? t('you') : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>: {m.text || (m.imageUrl ? '📷 Image' : '')}</div>)
             : <small>{t('noMessagesYet')}</small>}
         </div>
       </div>

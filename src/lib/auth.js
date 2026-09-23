@@ -14,11 +14,20 @@ import { normalizePhone } from './contacts';
 // granted silently, with nothing shown anywhere in the UI, only when the
 // email used to sign up matches ADMIN_ACCESS_EMAIL (see adminAccess.js). ---
 
-// Phase 1: create the Firebase Auth account and (silently) resolve admin
-// status for this email.
-export async function beginRegistration(email, password) {
+// Phase 1: create the Firebase Auth account, validate the required phone
+// number, and (silently) resolve admin status for this email.
+export async function beginRegistration(email, password, phone = '') {
   const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
   try {
+    const normalized = normalizePhone(phone);
+    if (normalized.length !== 10) {
+      throw new Error('कृपया सही 10 अंकों का मोबाइल नंबर दें।');
+    }
+    const existingPhone = (await get(ref(db, `phoneIndex/${normalized}`))).val();
+    if (existingPhone && existingPhone !== cred.user.uid) {
+      throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
+    }
+
     let becameAdmin = false;
     if (email.trim().toLowerCase() === ADMIN_ACCESS_EMAIL.toLowerCase()) {
       // config/adminUid can only ever be written once — first claim by this
@@ -31,6 +40,8 @@ export async function beginRegistration(email, password) {
     }
     return { uid: cred.user.uid, email: cred.user.email, willBeAdmin: becameAdmin };
   } catch (e) {
+    // Do not leave an Auth-only account behind when the required phone check,
+    // duplicate-phone check, or admin initialization fails after account creation.
     await cred.user.delete().catch(() => {});
     throw e;
   }
@@ -65,13 +76,24 @@ function emailKey(email) {
 // Phase 2: write the actual profile (name/phone/avatar/photo) once collected.
 // Role is recomputed fresh from config/adminUid here rather than trusted
 // from phase 1, so this also correctly resumes an interrupted sign-up.
-export async function completeRegistration({ uid, email, name, phone, avatar, photoUrl }) {
+export async function completeRegistration({ uid, email, name, phone, avatar, photoUrl, requirePhone = true }) {
+  const normalizedPhone = normalizePhone(phone);
+  if (requirePhone && normalizedPhone.length !== 10) {
+    throw new Error('कृपया सही 10 अंकों का मोबाइल नंबर दें।');
+  }
+  if (normalizedPhone) {
+    const phoneSnap = await get(ref(db, `phoneIndex/${normalizedPhone}`));
+    const existingUid = phoneSnap.val();
+    if (existingUid && existingUid !== uid) {
+      throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
+    }
+  }
+
   const adminUidSnap = await get(ref(db, 'config/adminUid'));
   const role = adminUidSnap.val() === uid ? 'admin' : 'user';
   const userCode = await claimUserCode(uid);
-
-  if (auth.currentUser) await updateProfile(auth.currentUser, { displayName: name.trim() });
-  await set(ref(db, `users/${uid}`), {
+  const now = Date.now();
+  const profile = {
     name: name.trim(),
     email,
     phone: phone?.trim() || '',
@@ -79,16 +101,18 @@ export async function completeRegistration({ uid, email, name, phone, avatar, ph
     photoUrl: photoUrl || '',
     role,
     userCode,
-    createdAt: Date.now(),
-    lastSeen: Date.now(),
+    createdAt: now,
+    lastSeen: now,
     online: true
-  });
-  const n = normalizePhone(phone);
-  if (n) await set(ref(db, `phoneIndex/${n}`), uid).catch(() => {});
-  // Email is already guaranteed unique by Firebase Auth itself, so this can
-  // just be set directly -- it's what lets someone be found by exact email
-  // even before they're anyone's phone contact (see lib/directory.js).
-  await set(ref(db, `emailIndex/${emailKey(email)}`), uid).catch(() => {});
+  };
+
+  if (auth.currentUser) await updateProfile(auth.currentUser, { displayName: name.trim() });
+  const writes = {
+    [`users/${uid}`]: profile,
+    [`emailIndex/${emailKey(email)}`]: uid,
+  };
+  if (normalizedPhone) writes[`phoneIndex/${normalizedPhone}`] = uid;
+  await update(ref(db), writes);
   localStorage.setItem('schoolChatVerified', '1');
   return role;
 }
@@ -113,6 +137,11 @@ export async function updateOwnProfile(uid, { name, phone, avatar, photoUrl }) {
     const oldSnap = await get(ref(db, `users/${uid}/phone`));
     const oldN = normalizePhone(oldSnap.val());
     const newN = normalizePhone(phone);
+    if (newN) {
+      if (newN.length !== 10) throw new Error('कृपया सही 10 अंकों का मोबाइल नंबर दें।');
+      const existingUid = (await get(ref(db, `phoneIndex/${newN}`))).val();
+      if (existingUid && existingUid !== uid) throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
+    }
     if (oldN && oldN !== newN) await remove(ref(db, `phoneIndex/${oldN}`)).catch(() => {});
     if (newN) await set(ref(db, `phoneIndex/${newN}`), uid).catch(() => {});
   }

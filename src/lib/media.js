@@ -2,6 +2,7 @@ import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from 'fi
 import { storage } from '../firebase';
 
 export const MAX_STATUS_MEDIA_BYTES = 15 * 1024 * 1024; // 15MB, matches storage.rules
+export const MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024;
 const UPLOAD_TIMEOUT_MS = 45 * 1000;
 
 function withTimeout(promise, ms, message) {
@@ -23,6 +24,62 @@ function withTimeout(promise, ms, message) {
 // upload here fails. This function used to just hang forever with no
 // feedback in that case ("posting..." never finished); it now times out and
 // surfaces a clear error instead.
+
+async function compressChatImage(file) {
+  if (file.size <= 2.5 * 1024 * 1024 && file.type !== 'image/heic' && file.type !== 'image/heif') return file;
+  try {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve(element);
+        element.onerror = reject;
+        element.src = url;
+      });
+      const maxSide = 1600;
+      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+      if (!blob) return file;
+      return new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    return file;
+  }
+}
+
+export async function uploadChatImage(uid, chatId, messageId, file) {
+  if (!storage) throw new Error('Firebase Storage शुरू नहीं हो पाया — फ़ोटो नहीं भेजी जा सकती।');
+  if (!file?.type?.startsWith('image/')) throw new Error('कृपया केवल फ़ोटो चुनें।');
+  if (file.size > 20 * 1024 * 1024) throw new Error('फ़ोटो बहुत बड़ी है। अधिकतम 20MB की मूल फ़ोटो चुनें।');
+  const prepared = await compressChatImage(file);
+  if (prepared.size > MAX_CHAT_IMAGE_BYTES) throw new Error('फ़ोटो compress करने के बाद भी 8MB से बड़ी है।');
+  const path = `chatMedia/${chatId}/${uid}/${messageId}`;
+  const objectRef = storageRef(storage, path);
+  try {
+    await withTimeout(
+      uploadBytes(objectRef, prepared, { contentType: prepared.type || 'image/jpeg' }),
+      UPLOAD_TIMEOUT_MS,
+      'फ़ोटो अपलोड नहीं हो सकी — इंटरनेट या Firebase Storage जाँचें।'
+    );
+    return await getDownloadURL(objectRef);
+  } catch (e) {
+    if (e?.code === 'storage/unauthorized') throw new Error('फ़ोटो अपलोड की अनुमति नहीं मिली — storage.rules अपडेट करें।');
+    throw e;
+  }
+}
+
+export async function deleteChatImage(uid, chatId, messageId) {
+  if (!storage) return;
+  await deleteObject(storageRef(storage, `chatMedia/${chatId}/${uid}/${messageId}`)).catch(() => {});
+}
+
 export async function uploadStatusMedia(uid, statusId, file) {
   if (!storage) {
     throw new Error('Firebase Storage शुरू नहीं हो पाया — फ़ाइल अपलोड नहीं हो सकती।');

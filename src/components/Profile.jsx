@@ -2,7 +2,16 @@ import React, { useRef, useState, useEffect } from 'react';
 import { usePrefs } from '../context/Prefs';
 
 // Same emoji set style as the AI-Studio version the user liked.
-export const AVATARS = ['🧑‍🎓', '👩‍🎓', '🧑‍💻', '👩‍💻', '🚀', '⭐', '🦁', '🦊', '🦉', '🎯', '⚡', '🔥'];
+export const AVATAR_GROUPS = [
+  { name: '🎓 स्टूडेंट', items: ['🧑‍🎓','👩‍🎓','🧑‍💻','👩‍💻','🧑‍🏫','👩‍🏫','🧑‍🚀','👩‍🚀','🎒','📚'] },
+  { name: '⚔️ एनीमे-स्टाइल', items: ['🥷','🗡️','⚔️','🏯','🐉','🦊','🐺','👺','👹','🌸','🌙','🔥','⚡','❄️','🌊','🍥','🌀','🎴','🧿','🦋'] },
+  { name: '🦸 हीरो-स्टाइल', items: ['🦸‍♂️','🦸‍♀️','🕷️','🛡️','🤖','🏹','🪖','💥','🦾','🦿','🦸','🦹‍♂️','🦹‍♀️','🧙‍♂️','🧙‍♀️'] },
+  { name: '🐾 जानवर', items: ['🐱','🐶','🦁','🐯','🐼','🐨','🐵','🐸','🐰','🦄','🐲','🦅','🦉','🐧','🦈'] },
+  { name: '🌌 कल्पना', items: ['👽','👾','🎃','🤡','💀','☠️','👻','👽','🧛','🧟','🧚','🧜','🪄','🔮','🌟'] },
+  { name: '🚀 गेम/कूल', items: ['🚀','🎮','🎯','🏆','🎧','🎸','🎤','🥇','⚽','🏎️','🛹','🔥','💎','👑','⭐'] },
+];
+
+export const AVATARS = [...new Set(AVATAR_GROUPS.flatMap(group => group.items))];
 
 // Shows a real uploaded photo if the user set one, otherwise the chosen
 // emoji avatar, otherwise falls back to the first letter of their name.
@@ -15,9 +24,16 @@ export function Avatar({ user, size = 'md' }) {
 
 export function AvatarPicker({ selected, onSelect }) {
   return (
-    <div className="avatar-grid">
-      {AVATARS.map(a => (
-        <button type="button" key={a} className={`avatar-choice ${selected === a ? 'chosen' : ''}`} onClick={() => onSelect(a)}>{a}</button>
+    <div className="avatar-picker-groups">
+      {AVATAR_GROUPS.map(group => (
+        <div className="avatar-group" key={group.name}>
+          <b className="avatar-group-title">{group.name}</b>
+          <div className="avatar-grid">
+            {group.items.map(a => (
+              <button type="button" key={`${group.name}-${a}`} title={group.name} className={`avatar-choice ${selected === a ? 'chosen' : ''}`} onClick={() => onSelect(a)}>{a}</button>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
