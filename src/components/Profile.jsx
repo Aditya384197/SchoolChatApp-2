@@ -3,14 +3,13 @@ import { usePrefs } from '../context/Prefs';
 
 // Same emoji set style as the AI-Studio version the user liked.
 export const AVATAR_GROUPS = [
-  { name: '🎓 स्टूडेंट', items: ['🧑‍🎓','👩‍🎓','🧑‍💻','👩‍💻','🧑‍🏫','👩‍🏫','🧑‍🚀','👩‍🚀','🎒','📚'] },
-  { name: '⚔️ एनीमे-स्टाइल', items: ['🥷','🗡️','⚔️','🏯','🐉','🦊','🐺','👺','👹','🌸','🌙','🔥','⚡','❄️','🌊','🍥','🌀','🎴','🧿','🦋'] },
-  { name: '🦸 हीरो-स्टाइल', items: ['🦸‍♂️','🦸‍♀️','🕷️','🛡️','🤖','🏹','🪖','💥','🦾','🦿','🦸','🦹‍♂️','🦹‍♀️','🧙‍♂️','🧙‍♀️'] },
-  { name: '🐾 जानवर', items: ['🐱','🐶','🦁','🐯','🐼','🐨','🐵','🐸','🐰','🦄','🐲','🦅','🦉','🐧','🦈'] },
-  { name: '🌌 कल्पना', items: ['👽','👾','🎃','🤡','💀','☠️','👻','👽','🧛','🧟','🧚','🧜','🪄','🔮','🌟'] },
-  { name: '🚀 गेम/कूल', items: ['🚀','🎮','🎯','🏆','🎧','🎸','🎤','🥇','⚽','🏎️','🛹','🔥','💎','👑','⭐'] },
+  { name: 'Anime-inspired', items: ['🥷','⚔️','🗡️','🎴','🐉','🦊','🐺','👺','🌸','🌙','🔥','⚡','❄️','🌊','🍥','🌀','🦋','🐈‍⬛'] },
+  { name: 'Hero & comic style', items: ['🦸‍♂️','🦸‍♀️','🦹‍♂️','🦹‍♀️','🕷️','🛡️','🤖','🏹','🪖','🦾','💥','🧙‍♂️','🧙‍♀️','🦸','🦹','⚡'] },
+  { name: 'Nature & scenic', items: ['🌅','🌄','🌇','🌌','🌠','🏔️','🌋','🏝️','🏜️','🌲','🌳','🌿','🍁','🌺','🌻','🌷','🌊','☁️','🌈','🌙'] },
+  { name: 'Animals', items: ['🐱','🐶','🦁','🐯','🐼','🐨','🐰','🦊','🐺','🦉','🦅','🦋','🐬','🐳','🦈','🐢','🦌','🐘','🦒','🐧'] },
+  { name: 'Fantasy & mystical', items: ['🧚','🧜','🧛','🧟','🧞','🐲','🦄','👻','👽','👾','🔮','🪄','🌟','☄️','💫','🌙'] },
+  { name: 'Cool & minimal', items: ['🎧','🎮','🎸','🎤','🚀','🏎️','⚽','🏆','🎯','💎','👑','⭐','🖤','🤍','🔥','🕶️'] },
 ];
-
 export const AVATARS = [...new Set(AVATAR_GROUPS.flatMap(group => group.items))];
 
 // Shows a real uploaded photo if the user set one, otherwise the chosen
@@ -23,19 +22,41 @@ export function Avatar({ user, size = 'md' }) {
 }
 
 export function AvatarPicker({ selected, onSelect }) {
+  const { lang } = usePrefs();
+  const [open, setOpen] = useState(false);
+  const title = lang === 'en' ? 'Choose an avatar' : 'अवतार चुनें';
+  const hint = lang === 'en' ? 'Pick a profile icon instead of a photo' : 'फोटो की जगह प्रोफ़ाइल आइकन चुनें';
+  const close = () => setOpen(false);
   return (
-    <div className="avatar-picker-groups">
-      {AVATAR_GROUPS.map(group => (
-        <div className="avatar-group" key={group.name}>
-          <b className="avatar-group-title">{group.name}</b>
-          <div className="avatar-grid">
-            {group.items.map(a => (
-              <button type="button" key={`${group.name}-${a}`} title={group.name} className={`avatar-choice ${selected === a ? 'chosen' : ''}`} onClick={() => onSelect(a)}>{a}</button>
-            ))}
+    <>
+      <button type="button" className="avatar-picker-trigger" onClick={() => setOpen(true)}>
+        <span className="avatar-picker-current">{selected || '🙂'}</span>
+        <span><b>{title}</b><small>{hint}</small></span>
+        <span className="row-end">›</span>
+      </button>
+      {open && (
+        <div className="avatar-modal-overlay" onClick={close}>
+          <div className="avatar-modal" onClick={e => e.stopPropagation()}>
+            <div className="avatar-modal-head">
+              <div><b>{title}</b><small>{hint}</small></div>
+              <button type="button" className="icon" onClick={close}>×</button>
+            </div>
+            <div className="avatar-modal-scroll">
+              {AVATAR_GROUPS.map(group => (
+                <section className="avatar-group" key={group.name}>
+                  <b className="avatar-group-title">{group.name}</b>
+                  <div className="avatar-grid">
+                    {group.items.map(a => (
+                      <button type="button" key={`${group.name}-${a}`} aria-label={group.name} className={`avatar-choice ${selected === a ? 'chosen' : ''}`} onClick={() => { onSelect(a); close(); }}>{a}</button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
           </div>
         </div>
-      ))}
-    </div>
+      )}
+    </>
   );
 }
 

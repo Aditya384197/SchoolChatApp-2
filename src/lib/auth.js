@@ -14,8 +14,8 @@ import { normalizePhone } from './contacts';
 // granted silently, with nothing shown anywhere in the UI, only when the
 // email used to sign up matches ADMIN_ACCESS_EMAIL (see adminAccess.js). ---
 
-// Phase 1: create the Firebase Auth account, validate the required phone
-// number, and (silently) resolve admin status for this email.
+// Phase 1: create the Firebase Auth account. Phone is optional; when supplied
+// it is normalized and checked for uniqueness.
 export async function beginRegistration(email, password, phone = '') {
   const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
   try {
@@ -78,8 +78,8 @@ function emailKey(email) {
 // from phase 1, so this also correctly resumes an interrupted sign-up.
 export async function completeRegistration({ uid, email, name, phone, avatar, photoUrl, requirePhone = true }) {
   const normalizedPhone = normalizePhone(phone);
-  if (requirePhone && normalizedPhone.length !== 10) {
-    throw new Error('कृपया सही 10 अंकों का मोबाइल नंबर दें।');
+  if (normalizedPhone && normalizedPhone.length !== 10) {
+    throw new Error('कृपया मोबाइल नंबर के 10 अंक सही डालें, या इसे खाली छोड़ दें।');
   }
   if (normalizedPhone) {
     const phoneSnap = await get(ref(db, `phoneIndex/${normalizedPhone}`));

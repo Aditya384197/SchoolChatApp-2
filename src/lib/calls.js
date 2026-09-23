@@ -224,6 +224,10 @@ export function useVoiceCall({ uid, users }) {
       });
       ringTimerRef.current = setTimeout(() => {
         if (activeRef.current?.chatId === callId && activeRef.current?.status === 'ringing') {
+          set(ref(db, `missedCalls/${peer.uid}/${callId}`), {
+            callerId: uid, callerName: peer.name || 'School Chat', receiverId: peer.uid,
+            createdAt: Date.now(), notified: false
+          }).catch(() => {});
           finishCall(callId).catch(() => {});
         }
       }, CALL_RING_TIMEOUT_MS);

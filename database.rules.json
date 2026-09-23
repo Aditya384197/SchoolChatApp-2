@@ -142,6 +142,15 @@
         }
       }
     },
+    "missedCalls": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$callId": {
+          ".write": "auth != null && ((auth.uid === $uid && !newData.exists()) || (newData.exists() && newData.child('receiverId').val() === $uid && newData.child('callerId').val() === auth.uid))",
+          ".validate": "newData.hasChildren(['callerId','receiverId','createdAt','notified']) && newData.child('receiverId').val() === $uid && newData.child('callerId').val() !== $uid && newData.child('notified').isBoolean()"
+        }
+      }
+    },
     "calls": {
       "$callId": {
         ".read": "auth != null && data.child('participants').child(auth.uid).exists()",

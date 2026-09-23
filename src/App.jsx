@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { onValue, ref } from 'firebase/database';
+import { onValue, ref, update } from 'firebase/database';
 import {
   ArrowLeft, MessageCircle, Search, Send, Phone, PhoneOff, Mic, MicOff, ImagePlus,
   ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare,
-  Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon,
+  Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon, Volume2,
   Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
@@ -17,7 +17,7 @@ import { getPhoneContacts, matchAndSaveContacts, normalizePhone } from './lib/co
 import { listenKnownContacts, addKnownContact, removeKnownContact, blockUser, unblockUser, findByCode, findByEmail } from './lib/directory';
 import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
-import { prepareNotifications, showMessageNotification } from './lib/notifications';
+import { prepareNotifications, showMessageNotification, listenNotificationActions } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
 import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
 import { usePrefs } from './context/Prefs';
@@ -28,6 +28,7 @@ import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 import { useVoiceCall } from './lib/calls';
+import { setSpeakerRoute } from './lib/audioRoute';
 
 function formatLastSeen(ts, t, lang) {
   const tr = t || ((k) => k);
@@ -150,7 +151,7 @@ function RegisterWizard({ onSwitch }) {
     e.preventDefault();
     setError('');
     const normalized = normalizePhone(phone);
-    if (normalized.length !== 10) {
+    if (normalized && normalized.length !== 10) {
       setError(t('validPhoneError'));
       return;
     }
@@ -158,7 +159,7 @@ function RegisterWizard({ onSwitch }) {
     localStorage.setItem('schoolChatPendingPhone', phone);
     try {
       const result = await beginRegistration(email, password, phone);
-      setIdentity({ ...result, phone, requirePhone: true });
+      setIdentity({ ...result, phone, requirePhone: false });
     } catch (e) {
       localStorage.removeItem('schoolChatPendingPhone');
       setError(e.message || t('pleaseWait'));
@@ -172,11 +173,10 @@ function RegisterWizard({ onSwitch }) {
       <img className="brand-image" src="/school-chat-icon.png" alt={t('appName')} />
       <h1>{t('newAccount')}</h1>
       <StepDots step={1} total={2} />
-      <p className="disclosure">{t('disclosure')}</p>
       <form onSubmit={submit}>
         <label>{t('email')}<input type="email" value={email} onChange={e => setEmail(e.target.value)} required autoComplete="email" /></label>
         <label>{t('password')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength="6" required autoComplete="new-password" /></label>
-        <label>{t('phone')}<input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder={t('phonePlaceholder')} required /></label>
+        <label>{t('phone')} <span className="optional">({t('optional')})</span><input value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder={t('phonePlaceholder')} /></label>
         <p className="muted small form-hint">{t('phoneHint')}</p>
         {error && <div className="error">{error}</div>}
         <button className="primary" disabled={busy}>{busy ? t('pleaseWait') : t('createAccount')}</button>
@@ -636,6 +636,21 @@ function CallAvatar({ user }) {
 function IncomingVoiceCall({ call, onAccept, onDecline }) {
   const { t } = usePrefs();
   const peer = call.peer || { uid: call.callerId, name: 'School Chat' };
+  useEffect(() => {
+    let ctx; let timer; let stopped = false;
+    const beep = () => {
+      try {
+        ctx ||= new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator(); const gain = ctx.createGain();
+        osc.frequency.value = 880; gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
+        osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.3);
+      } catch {}
+    };
+    beep(); timer = setInterval(() => { if (!stopped) beep(); }, 1200);
+    return () => { stopped = true; clearInterval(timer); try { ctx?.close(); } catch {} };
+  }, []);
   return (
     <div className="voice-overlay">
       <div className="voice-card incoming">
@@ -655,6 +670,7 @@ function IncomingVoiceCall({ call, onAccept, onDecline }) {
 function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) {
   const { t } = usePrefs();
   const [elapsed, setElapsed] = useState(0);
+  const [speaker, setSpeaker] = useState(false);
   const audioRef = useRef(null);
   const startedAt = call.startedAt;
 
@@ -672,20 +688,39 @@ function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) 
     if (remoteStream) audioRef.current.play().catch(() => {});
   }, [remoteStream]);
 
+  async function toggleSpeaker() {
+    const next = !speaker;
+    setSpeaker(next);
+    // Chromium/WebView exposes setSinkId only on some devices. Keep the UI
+    // state useful everywhere and use the available output selector when the
+    // platform exposes it; Android WebView otherwise keeps its native call
+    // audio route.
+    try {
+      await setSpeakerRoute(next);
+    } catch {
+      try { if (audioRef.current?.setSinkId) await audioRef.current.setSinkId('default'); } catch {}
+    }
+  }
+
   const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const secs = String(elapsed % 60).padStart(2, '0');
-  const label = call.status === 'ringing' ? t('calling') : call.status === 'connecting' ? t('connecting') : `${mins}:${secs}`;
+  const label = call.status === 'ringing'
+    ? (call.peer?.online ? t('ringing') : t('calling'))
+    : call.status === 'connecting' ? t('connecting') : `${mins}:${secs}`;
   return (
     <div className="voice-overlay active-call-overlay">
-      <div className="voice-card active">
-        <Phone size={22} className="voice-top-icon pulse-icon" />
-        <CallAvatar user={call.peer} />
-        <b className="voice-name">{call.peer?.name || t('user')}</b>
-        <span className="voice-status">{label}</span>
+      <div className="voice-fullscreen">
+        <div className="call-top-area">
+          <div className="call-avatar-ring"><CallAvatar user={call.peer} /></div>
+          <b className="voice-name">{call.peer?.name || t('user')}</b>
+          <span className="voice-status">{label}</span>
+          {call.status === 'active' && <span className="call-duration">{`${mins}:${secs}`}</span>}
+        </div>
         <audio ref={audioRef} autoPlay playsInline />
-        <div className="voice-actions">
-          <button className={`voice-action secondary-action ${muted ? 'on' : ''}`} onClick={onToggleMute}>{muted ? <MicOff size={21} /> : <Mic size={21} />}<small>{muted ? t('unmute') : t('mute')}</small></button>
-          <button className="voice-action decline" onClick={onHangUp}><PhoneOff size={22} /><small>{t('endCall')}</small></button>
+        <div className="call-controls">
+          <button className={`call-control ${speaker ? 'active' : ''}`} onClick={toggleSpeaker}><Volume2 size={23} /><small>{t('speaker')}</small></button>
+          <button className={`call-control ${muted ? 'active' : ''}`} onClick={onToggleMute}>{muted ? <MicOff size={23} /> : <Mic size={23} />}<small>{muted ? t('unmute') : t('mute')}</small></button>
+          <button className="call-control end" onClick={onHangUp}><PhoneOff size={25} /><small>{t('endCall')}</small></button>
         </div>
       </div>
     </div>
@@ -794,6 +829,43 @@ function AppShell({ me, profile }) {
     prepareNotifications().then(setNotificationsReady);
     cleanupExpiredStatus(me.uid).catch(() => {});
   }, [me.uid]);
+  useEffect(() => {
+    let stop;
+    listenNotificationActions(action => {
+      const extra = action?.notification?.extra || {};
+      if (extra?.type === 'message' && extra.senderId) {
+        localStorage.setItem('schoolChatPendingChat', extra.senderId);
+      }
+      if (extra?.type === 'message' && extra.chatId && action.actionId === 'mark-read') {
+        clearUnread(me.uid, extra.chatId).catch(() => {});
+      }
+    }).then(fn => { stop = fn; });
+    return () => stop?.();
+  }, [me.uid]);
+
+  useEffect(() => {
+    const pending = localStorage.getItem('schoolChatPendingChat');
+    if (!pending || !users.length) return;
+    const found = users.find(u => u.uid === pending);
+    if (found) { setChatUser(found); localStorage.removeItem('schoolChatPendingChat'); }
+  }, [users]);
+  useEffect(() => {
+    const stop = onValue(ref(db, `missedCalls/${me.uid}`), snap => {
+      const all = snap.val() || {};
+      const pending = Object.entries(all).filter(([, item]) => item && !item.notified);
+      pending.forEach(([id, item]) => {
+        if (!notificationsReady) return;
+        showMessageNotification({
+          title: t('missedVoiceCall'),
+          body: `${item.callerName || t('user')} ${t('calledYou')}`,
+          id: Math.abs(Number(String(id).replace(/\D/g, '').slice(-9) || Date.now()) % 2147483647),
+          extra: { type: 'missedCall', callerId: item.callerId }
+        }).catch(() => {});
+        update(ref(db, `missedCalls/${me.uid}/${id}`), { notified: true }).catch(() => {});
+      });
+    });
+    return () => stop?.();
+  }, [me.uid, notificationsReady, t]);
 
   useEffect(() => onValue(ref(db, 'statuses'), snap => {
     const all = snap.val() || {};
@@ -820,7 +892,7 @@ function AppShell({ me, profile }) {
           setPreviews(prev => ({ ...prev, [chatId]: { text: latest.text, mine: latest.senderId === me.uid, at: latest.createdAt || 0 } }));
         }
         if (!first && latest?.receiverId === me.uid && !latest.seen && notificationsReady && chatUser?.uid !== user.uid) {
-          showMessageNotification({ title: user.name, body: latest.text, id: Number(Date.now() % 2147483647) });
+          showMessageNotification({ title: user.name, body: latest.text || '📷 Image', id: Number(Date.now() % 2147483647), extra: { type: 'message', senderId: user.uid, chatId } });
         }
         first = false;
       });
@@ -1135,7 +1207,6 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   else panelContent = <>
     <PanelHeader title={t('settings')} onBack={onClose} />
     <div className="settings-main-content">
-      <p className="disclosure small">{t('disclosure')}</p>
       <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
       <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
       {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
@@ -1149,8 +1220,8 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   </>;
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <aside className="drawer" onClick={e => e.stopPropagation()}>
+    <div className="overlay settings-overlay" onClick={onClose}>
+      <aside className="drawer settings-drawer" onClick={e => e.stopPropagation()}>
         <div key={panel} className="settings-panel-view">{panelContent}</div>
       </aside>
     </div>
