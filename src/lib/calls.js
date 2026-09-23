@@ -2,6 +2,7 @@ import React from 'react';
 import { onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
 import { db } from '../firebase';
 import { chatIdFor } from './chat';
+import { clearAudioRoute } from './audioRoute';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const CALL_RING_TIMEOUT_MS = 30 * 1000;
@@ -99,6 +100,7 @@ export function useVoiceCall({ uid, users }) {
     roleRef.current = null;
     peerUidRef.current = null;
     remoteDescriptionSetRef.current = false;
+    clearAudioRoute().catch(() => {});
     setRemoteStream(null);
     setMuted(false);
   }

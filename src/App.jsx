@@ -3,8 +3,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref, update } from 'firebase/database';
 import {
   ArrowLeft, MessageCircle, Search, Send, Phone, PhoneOff, Mic, MicOff, ImagePlus,
-  ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare, Info, Camera,
-  Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon, Volume2,
+  ShieldCheck, Users, X, LayoutGrid, MessagesSquare, Info, Camera,
+  Settings as SettingsIcon, Copy, Share2, Video, File as FileIcon, Image as ImageIcon, Type as TypeIcon, Volume2,
   Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
@@ -23,12 +23,12 @@ import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, cha
 import { usePrefs } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus } from './lib/status';
-import { uploadStatusMedia, uploadChatImage, deleteChatImage } from './lib/media';
+import { uploadStatusMedia, uploadChatMedia, getAttachmentKind, deleteChatImage } from './lib/media';
 import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 import { useVoiceCall } from './lib/calls';
-import { setSpeakerRoute, getAudioRoutes, setAudioRoute } from './lib/audioRoute';
+import { getAudioRoutes, setAudioRoute } from './lib/audioRoute';
 
 function formatLastSeen(ts, t, lang) {
   if (!ts) return lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
@@ -247,15 +247,21 @@ function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, select
   const mine=message.senderId===me.uid, pressTimer=useRef(null);
   function start(){if(!selectionMode) pressTimer.current=setTimeout(()=>onLongPress(message),500)} function stop(){clearTimeout(pressTimer.current)}
   function tap(){if(selectionMode){onToggleSelect(message.id);return} if(!mine) onSeen(message.id)}
+  const attachmentType = message.type || (message.imageUrl ? 'image' : 'text');
+  const attachmentUrl = message.fileUrl || message.imageUrl || '';
   return <div data-message-date={message.createdAt?new Date(message.createdAt).toDateString():''} className={`bubble ${mine?'mine bubble-enter-mine':'theirs bubble-enter-theirs'} ${selected?'selected':''}`} onClick={tap} onPointerDown={start} onPointerUp={stop} onPointerLeave={stop} onContextMenu={e=>{e.preventDefault();onLongPress(message)}}>
-    {message.imageUrl&&<img className="message-image" src={message.imageUrl} alt={message.text||'Image'} loading="lazy"/>}{message.text&&<div>{message.text}</div>}
-    <div className="message-meta"><span>{message.createdAt?new Date(message.createdAt).toLocaleTimeString('hi-IN',{hour:'2-digit',minute:'2-digit'}):'…'}</span>{mine&&<span className={`ticks ${message.seen?'seen':''}`}>{message.delivered?'✓✓':'✓'}</span>}</div>
+    {attachmentType==='image' && attachmentUrl && <img className="message-image" src={attachmentUrl} alt={message.text||'Image'} loading="lazy"/>}
+    {attachmentType==='video' && attachmentUrl && <video className="message-video" src={attachmentUrl} controls playsInline preload="metadata"/>}
+    {attachmentType==='file' && attachmentUrl && <a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>📎 <span>{message.fileName||'File'}</span></a>}
+    {message.text&&<div>{message.text}</div>}
+    <div className="message-meta"><span>{message.createdAt?new Date(message.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'…'}</span>{mine&&<span className={`ticks ${message.seen?'seen':''}`}>{message.delivered?'✓✓':'✓'}</span>}</div>
   </div>
 }
 
 function MessageInfo({message,me,onClose}){
   const {t}=usePrefs(); const fmt=ts=>ts?new Date(ts).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):t('notAvailable');
-  return <div className="info-overlay" onClick={onClose}><aside className="message-info" onClick={e=>e.stopPropagation()}><PanelHeader title={t('messageInfo')} onBack={onClose}/><div className="info-message-preview">{message.imageUrl&&<img src={message.imageUrl} alt=""/>}{message.text&&<p>{message.text}</p>}<small>{fmt(message.createdAt)}</small></div><div className="info-list"><div><b>{message.senderId===me.uid?t('sent'):t('received')}</b><span>{fmt(message.createdAt)}</span></div><div><b>{t('delivered')}</b><span>{fmt(message.deliveredAt)}</span></div><div><b>{t('seen')}</b><span>{fmt(message.seenAt)}</span></div></div></aside></div>
+  const attachmentUrl=message.fileUrl||message.imageUrl||''; const type=message.type||(message.imageUrl?'image':'text');
+  return <div className="info-overlay" onClick={onClose}><aside className="message-info" onClick={e=>e.stopPropagation()}><PanelHeader title={t('messageInfo')} onBack={onClose}/><div className="info-message-preview">{type==='image'&&attachmentUrl&&<img src={attachmentUrl} alt=""/>}{type==='video'&&attachmentUrl&&<video src={attachmentUrl} controls playsInline preload="metadata"/>}{type==='file'&&attachmentUrl&&<a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer">📎 <span>{message.fileName||'File'}</span></a>}{message.text&&<p>{message.text}</p>}<small>{fmt(message.createdAt)}</small></div><div className="info-list"><div><b>{message.senderId===me.uid?t('sent'):t('received')}</b><span>{fmt(message.createdAt)}</span></div><div><b>{t('delivered')}</b><span>{fmt(message.deliveredAt)}</span></div><div><b>{t('seen')}</b><span>{fmt(message.seenAt)}</span></div></div></aside></div>
 }
 
 function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDeleteForEveryone }) {
@@ -330,8 +336,9 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const [messages, setMessages] = useState([]);
   const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState(null);
+  const [attachmentPreview, setAttachmentPreview] = useState('');
+  const [attachmentKind, setAttachmentKind] = useState(null);
   const [typingUsers, setTypingUsers] = useState({});
   const [sending, setSending] = useState(false);
   const [imageError, setImageError] = useState('');
@@ -349,7 +356,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const inputRef = useRef(null);
   const typingTimer = useRef(null);
   const typingActive = useRef(false);
-  const imageInputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const selectionMode = selectedIds.size > 0;
 
   function clearSelection() { setSelectedIds(new Set()); }
@@ -396,30 +403,34 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     }
   }
 
-  useEffect(() => () => { if (imagePreview) URL.revokeObjectURL(imagePreview); }, [imagePreview]);
+  useEffect(() => () => { if (attachmentPreview) URL.revokeObjectURL(attachmentPreview); }, [attachmentPreview]);
 
-  function pickChatImage(e) {
+  function pickChatAttachment(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!file.type.startsWith('image/')) return;
+    const kind = getAttachmentKind(file);
+    if (!kind) { setImageError('Supported files: images, videos, PDF and .bin.'); return; }
+    if (file.size > 15 * 1024 * 1024) { setImageError('File is larger than 15 MB.'); return; }
     setImageError('');
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachmentFile(file);
+    setAttachmentKind(kind);
+    setAttachmentPreview(kind === 'image' || kind === 'video' ? URL.createObjectURL(file) : '');
   }
 
-  function clearChatImage() {
-    if (imagePreview) URL.revokeObjectURL(imagePreview);
-    setImageFile(null);
-    setImagePreview('');
+  function clearChatAttachment() {
+    if (attachmentPreview) URL.revokeObjectURL(attachmentPreview);
+    setAttachmentFile(null);
+    setAttachmentKind(null);
+    setAttachmentPreview('');
     setImageError('');
   }
 
   async function submit(e) {
     e.preventDefault();
     const value = text.trim();
-    if ((!value && !imageFile) || sending) return;
+    if ((!value && !attachmentFile) || sending) return;
     setSending(true);
     setImageError('');
     setText('');
@@ -427,18 +438,28 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     typingActive.current = false;
     setTyping(chatId, me.uid, false).catch(() => {});
 
-    if (imageFile) {
-      const file = imageFile;
+    if (attachmentFile) {
+      const file = attachmentFile;
+      const kind = attachmentKind;
       const messageId = createMessageId(chatId);
-      clearChatImage();
+      clearChatAttachment();
       try {
-        const imageUrl = await uploadChatImage(me.uid, chatId, messageId, file);
-        await sendMessage(chatId, me.uid, user.uid, value, { type: 'image', imageUrl, messageId });
+        const uploaded = await uploadChatMedia(me.uid, chatId, messageId, file);
+        await sendMessage(chatId, me.uid, user.uid, value, {
+          type: kind,
+          fileUrl: uploaded.url,
+          fileName: uploaded.file.name,
+          fileType: uploaded.file.type || file.type || 'application/octet-stream',
+          fileSize: uploaded.file.size,
+          messageId
+        });
       } catch (error) {
-        setImageError(error?.message || t('imageSendFailed'));
+        setImageError(error?.message || 'File could not be sent. Please try again.');
         setText(value);
         setSending(false);
-        setImageFile(file); setImagePreview(URL.createObjectURL(file));
+        setAttachmentFile(file);
+        setAttachmentKind(kind);
+        setAttachmentPreview(kind === 'image' || kind === 'video' ? URL.createObjectURL(file) : '');
         return;
       }
     } else {
@@ -553,20 +574,22 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
       {imageError && <div className="error chat-image-error">{imageError}</div>}
-      {imagePreview && (
+      {attachmentFile && (
         <div className="chat-attachment-preview">
-          <img src={imagePreview} alt="" />
+          {attachmentKind === 'image' && attachmentPreview && <img src={attachmentPreview} alt="" />}
+          {attachmentKind === 'video' && attachmentPreview && <video src={attachmentPreview} muted playsInline />}
+          {attachmentKind === 'file' && <div className="attachment-file-preview">📎 <b>{attachmentFile.name}</b><small>{Math.ceil(attachmentFile.size / 1024)} KB</small></div>}
           <input value={text} onChange={e=>setText(e.target.value)} placeholder={t('imageCaption')} />
-          <button type="button" className="icon" onClick={clearChatImage} title={t('removePhoto')}><X size={18} /></button>
+          <button type="button" className="icon" onClick={clearChatAttachment} title="Remove"><X size={18} /></button>
         </div>
       )}
       <form className="composer" onSubmit={submit}>
-        <button type="button" className="icon attach-btn" onClick={() => setImageSourceOpen(true)} title={t('sendImage')} disabled={sending}><ImagePlus size={21} /></button>
+        <button type="button" className="icon attach-btn" onClick={() => setImageSourceOpen(true)} title="Attach" disabled={sending}><ImagePlus size={21} /></button>
         <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder={t('messagePlaceholder')} />
         <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
-      <input ref={galleryRef} type="file" hidden accept="image/*" onChange={pickChatImage}/><input ref={cameraRef} type="file" hidden accept="image/*" capture="environment" onChange={pickChatImage}/>
-      {imageSourceOpen&&<div className="source-overlay" onClick={()=>setImageSourceOpen(false)}><div className="source-card" onClick={e=>e.stopPropagation()}><b>{t('sendImage')}</b><button onClick={()=>{setImageSourceOpen(false);galleryRef.current?.click()}}><ImageIcon/>{t('gallery')}</button><button onClick={()=>{setImageSourceOpen(false);cameraRef.current?.click()}}><Camera/>{t('camera')}</button><button className="cancel" onClick={()=>setImageSourceOpen(false)}>{t('cancel')}</button></div></div>}
+      <input ref={galleryRef} type="file" hidden accept="image/*,video/*" onChange={pickChatAttachment}/><input ref={cameraRef} type="file" hidden accept="image/*" capture="environment" onChange={pickChatAttachment}/><input ref={fileInputRef} type="file" hidden accept="image/*,video/*,application/pdf,application/octet-stream,.pdf,.bin" onChange={pickChatAttachment}/>
+      {imageSourceOpen&&<div className="source-overlay" onClick={()=>setImageSourceOpen(false)}><div className="source-card" onClick={e=>e.stopPropagation()}><b>Attach file</b><button onClick={()=>{setImageSourceOpen(false);cameraRef.current?.click()}}><Camera/>Camera</button><button onClick={()=>{setImageSourceOpen(false);galleryRef.current?.click()}}><ImageIcon/>Gallery</button><button onClick={()=>{setImageSourceOpen(false);fileInputRef.current?.click()}}><FileIcon/>Files</button><button className="cancel" onClick={()=>setImageSourceOpen(false)}>Cancel</button></div></div>}
       {!nearBottom&&<button className="scroll-bottom" onClick={scrollBottom}><ArrowLeft size={17} style={{transform:'rotate(-90deg)'}}/></button>}
       {infoMessage&&<MessageInfo message={infoMessage} me={me} onClose={()=>setInfoMessage(null)}/>}
       {showDeleteSheet&&(
@@ -666,14 +689,39 @@ function IncomingVoiceCall({ call, onAccept, onDecline }) {
 }
 
 function ActiveVoiceCall({call,remoteStream,muted,onToggleMute,onHangUp}){
-  const {t}=usePrefs();const [elapsed,setElapsed]=useState(0);const [route,setRoute]=useState('earpiece');const [routes,setRoutes]=useState({bluetooth:false});const [routeOpen,setRouteOpen]=useState(false);const [minimized,setMinimized]=useState(false);const audioRef=useRef(null);
+  const {t}=usePrefs();const [elapsed,setElapsed]=useState(0);const [route,setRoute]=useState('earpiece');const [routes,setRoutes]=useState({bluetooth:false});const [routeOpen,setRouteOpen]=useState(false);const [minimized,setMinimized]=useState(false);const audioRef=useRef(null);const routeRef=useRef('earpiece');
   useBackHandler(()=>{if(!minimized){setMinimized(true);return true}return false});
+  useEffect(()=>{routeRef.current=route},[route]);
   useEffect(()=>{if(!call.startedAt){setElapsed(0);return}const id=setInterval(()=>setElapsed(Math.floor((Date.now()-call.startedAt)/1000)),1000);return()=>clearInterval(id)},[call.startedAt]);
-  useEffect(()=>{getAudioRoutes().then(setRoutes)},[]);useEffect(()=>{if(audioRef.current){audioRef.current.srcObject=remoteStream||null;if(remoteStream)audioRef.current.play().catch(()=>{})}},[remoteStream]);
-  async function chooseRoute(r){setRoute(r);setRouteOpen(false);await setAudioRoute(r)}
-  const mins=Math.floor(elapsed/60),secs=String(elapsed%60).padStart(2,'0'),duration=`${mins}:${secs}`,status=call.status==='ringing'?(call.peer?.online?t('ringing'):t('calling')):call.status==='connecting'?t('connecting'):duration;
+  useEffect(()=>{
+    let live = true;
+    const refresh = () => getAudioRoutes().then(value => {
+      if (!live) return;
+      setRoutes(value);
+      if (!value.bluetooth && routeRef.current === 'bluetooth') {
+        setAudioRoute('earpiece').catch(() => {});
+        setRoute('earpiece');
+        setRouteOpen(false);
+      }
+    });
+    setAudioRoute('earpiece').catch(() => {});
+    refresh();
+    const timer = setInterval(refresh, 2000);
+    return () => { live = false; clearInterval(timer); };
+  },[]);
+  useEffect(()=>{if(audioRef.current){audioRef.current.srcObject=remoteStream||null;if(remoteStream)audioRef.current.play().catch(()=>{})}},[remoteStream]);
+  async function chooseRoute(r){
+    const ok = await setAudioRoute(r);
+    if (ok) { setRoute(r); setRouteOpen(false); }
+  }
+  async function toggleOutput(){
+    if(routes.bluetooth){setRouteOpen(v=>!v);return;}
+    const next=route==='speaker'?'earpiece':'speaker';
+    await chooseRoute(next);
+  }
+  const mins=Math.floor(elapsed/60),secs=String(elapsed%60).padStart(2,'0'),duration=`${mins}:${secs}`,status=call.status==='ringing'?(call.peer?.online?'Ringing…':'Calling…'):call.status==='connecting'?'Connecting…':duration;
   if(minimized)return <button className="mini-call-pill" onClick={()=>setMinimized(false)}><span className="mini-call-icon"><Phone size={15}/></span><span>{call.peer?.name||t('user')}</span><b>{duration}</b></button>;
-  return <div className="voice-overlay active-call-overlay"><div className="voice-fullscreen"><div className="call-top-area"><CallAvatar user={call.peer}/><b className="voice-name">{call.peer?.name||t('user')}</b><span className="voice-status">{status}</span></div><audio ref={audioRef} autoPlay playsInline/><div className="call-controls"><div className="route-wrap"><button className={`call-control ${route==='speaker'?'active':''}`} onClick={()=>setRouteOpen(v=>!v)}><Volume2 size={23}/><small>{route==='bluetooth'?'Bluetooth':route==='speaker'?t('speaker'):t('earpiece')}</small></button>{routeOpen&&<div className="route-menu"><button onClick={()=>chooseRoute('earpiece')}>{t('earpiece')}</button><button onClick={()=>chooseRoute('speaker')}>{t('speaker')}</button>{routes.bluetooth&&<button onClick={()=>chooseRoute('bluetooth')}>Bluetooth</button>}</div>}</div><button className={`call-control ${muted?'active':''}`} onClick={onToggleMute}>{muted?<MicOff size={23}/>:<Mic size={23}/>}<small>{muted?t('unmute'):t('mute')}</small></button><div className="end-wrap"><button className="call-control end" onClick={onHangUp}><PhoneOff size={25}/></button><small className="end-label">{t('endCall')}</small></div></div></div></div>
+  return <div className="voice-overlay active-call-overlay"><div className="voice-fullscreen"><div className="call-top-area"><CallAvatar user={call.peer}/><b className="voice-name">{call.peer?.name||t('user')}</b><span className="voice-status">{status}</span></div><audio ref={audioRef} autoPlay playsInline/><div className="call-controls"><div className="route-wrap"><button className={`call-control ${route==='speaker'?'active':''}`} onClick={toggleOutput}><Volume2 size={23}/><small>{route==='bluetooth'?'Bluetooth':route==='speaker'?'Speaker':'Earpiece'}</small></button>{routeOpen&&routes.bluetooth&&<div className="route-menu"><button onClick={()=>chooseRoute('Earpiece'.toLowerCase())}>Earpiece</button><button onClick={()=>chooseRoute('speaker')}>Speaker</button><button onClick={()=>chooseRoute('bluetooth')}>Bluetooth</button></div>}</div><button className={`call-control ${muted?'active':''}`} onClick={onToggleMute}>{muted?<MicOff size={23}/>:<Mic size={23}/>}<small>{muted?'Unmute':'Mute'}</small></button><div className="end-wrap"><button className="call-control end" onClick={onHangUp}><Phone size={25} style={{transform:'rotate(135deg)'}}/></button><small className="end-label">End</small></div></div></div></div>
 }
 
 function AppShell({ me, profile }) {
@@ -841,7 +889,7 @@ function AppShell({ me, profile }) {
           setPreviews(prev => ({ ...prev, [chatId]: { text: latest.text, mine: latest.senderId === me.uid, at: latest.createdAt || 0 } }));
         }
         if (!first && latest?.receiverId === me.uid && !latest.seen && notificationsReady && chatUser?.uid !== user.uid) {
-          showMessageNotification({ title: user.name, body: latest.text || '📷 Image', id: Number(Date.now() % 2147483647), extra: { type: 'message', senderId: user.uid, chatId } });
+          showMessageNotification({ title: user.name, body: latest.text || (latest.type === 'video' ? '🎥 Video' : latest.type === 'file' ? `📎 ${latest.fileName || 'File'}` : '📷 Image'), id: Number(Date.now() % 2147483647), extra: { type: 'message', senderId: user.uid, chatId } });
         }
         first = false;
       });
@@ -909,8 +957,18 @@ function AppShell({ me, profile }) {
     );
   }
 
+  const backgroundStyle = background === 'dots'
+    ? { backgroundImage: 'radial-gradient(circle, rgba(100,116,139,.20) 1px, transparent 1.4px)', backgroundSize: '18px 18px' }
+    : background === 'grid'
+      ? { backgroundImage: 'linear-gradient(rgba(100,116,139,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,.12) 1px, transparent 1px)', backgroundSize: '26px 26px' }
+      : background === 'waves'
+        ? { backgroundImage: 'radial-gradient(ellipse at 15% 15%, rgba(59,130,246,.10) 0 18%, transparent 19%), radial-gradient(ellipse at 85% 75%, rgba(34,197,94,.08) 0 16%, transparent 17%)' }
+        : background === 'diagonal'
+          ? { backgroundImage: 'repeating-linear-gradient(135deg, rgba(100,116,139,.10) 0 1px, transparent 1px 18px)' }
+          : undefined;
+
   return (
-    <div className={`screen app-background-${background}`}>
+    <div className={`screen app-background-${background}`} style={backgroundStyle}>
       <header className="topbar">
         <div className="brand-line">
           <Avatar user={profile} size="sm" />
@@ -978,10 +1036,24 @@ function StatusComposer({ me, onClose }) {
   const fileRef = useRef(null);
   const BG_CHOICES = ['#0f6fe8', '#16a34a', '#dc2626', '#7c3aed', '#0f172a', '#ea580c'];
 
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  function clearSelectedFile() {
+    if (preview) URL.revokeObjectURL(preview);
+    setFile(null);
+    setPreview('');
+  }
+
   function pickFile(e) {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
+    const isPhoto = tab === 'photo' && f.type.startsWith('image/');
+    const isVideo = tab === 'video' && f.type.startsWith('video/');
+    if (!isPhoto && !isVideo) { setError(tab === 'photo' ? 'Please choose an image.' : 'Please choose a video.'); return; }
+    if (f.size > 15 * 1024 * 1024) { setError('File is larger than 15 MB.'); return; }
+    if (preview) URL.revokeObjectURL(preview);
+    setError('');
     setFile(f);
     setPreview(URL.createObjectURL(f));
   }
@@ -1013,9 +1085,9 @@ function StatusComposer({ me, onClose }) {
       <div className="status-composer" onClick={e => e.stopPropagation()}>
         <PanelHeader title={t('statusComposerTitle')} onBack={onClose} />
         <div className="composer-tabs">
-          <button className={tab === 'text' ? 'active' : ''} onClick={() => { setTab('text'); setFile(null); setPreview(''); }}><TypeIcon size={16} /> {t('textTab')}</button>
-          <button className={tab === 'photo' ? 'active' : ''} onClick={() => setTab('photo')}><ImageIcon size={16} /> {t('photoTab')}</button>
-          <button className={tab === 'video' ? 'active' : ''} onClick={() => setTab('video')}><Video size={16} /> {t('videoTab')}</button>
+          <button className={tab === 'text' ? 'active' : ''} onClick={() => { setTab('text'); clearSelectedFile(); }}><TypeIcon size={16} /> {t('textTab')}</button>
+          <button className={tab === 'photo' ? 'active' : ''} onClick={() => { setTab('photo'); clearSelectedFile(); }}><ImageIcon size={16} /> {t('photoTab')}</button>
+          <button className={tab === 'video' ? 'active' : ''} onClick={() => { setTab('video'); clearSelectedFile(); }}><Video size={16} /> {t('videoTab')}</button>
         </div>
 
         {tab === 'text' && (
@@ -1030,11 +1102,14 @@ function StatusComposer({ me, onClose }) {
         )}
 
         {tab !== 'text' && (
-          <button type="button" className="media-pick-box" onClick={() => fileRef.current?.click()}>
-            {preview
-              ? (tab === 'photo' ? <img src={preview} alt="" /> : <video src={preview} muted playsInline />)
-              : <span>{tab === 'photo' ? t('choosePhoto') : t('chooseVideo')}</span>}
-          </button>
+          <div className="status-media-pick-wrap">
+            <button type="button" className="media-pick-box" onClick={() => fileRef.current?.click()}>
+              {preview
+                ? (tab === 'photo' ? <img src={preview} alt="" /> : <video src={preview} muted playsInline />)
+                : <span>{tab === 'photo' ? t('choosePhoto') : t('chooseVideo')}</span>}
+            </button>
+            {preview && <button type="button" className="icon status-media-clear" onClick={clearSelectedFile} title="Remove"><X size={18}/></button>}
+          </div>
         )}
         <input ref={fileRef} type="file" hidden accept={tab === 'photo' ? 'image/*' : 'video/*'} onChange={pickFile} />
 
@@ -1232,7 +1307,7 @@ function AdminPanel({ users, me }) {
         </header>
         <div className="content admin-transcript">
           {logs.length
-            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? t('you') : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>: {m.text || (m.imageUrl ? '📷 Image' : '')}</div>)
+            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? t('you') : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>: {m.text || (m.type === 'video' ? '🎥 Video' : m.type === 'file' ? `📎 ${m.fileName || 'File'}` : (m.imageUrl || m.fileUrl ? '📷 Image' : ''))}</div>)
             : <small>{t('noMessagesYet')}</small>}
         </div>
       </div>

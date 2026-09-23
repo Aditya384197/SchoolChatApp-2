@@ -30,7 +30,9 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
   const clean = String(text || '').trim();
   const type = options.type || 'text';
   const imageUrl = options.imageUrl || '';
-  if (!clean && !imageUrl) return null;
+  const fileUrl = options.fileUrl || imageUrl || '';
+  const attachmentType = type === 'image' || type === 'video' || type === 'file' ? type : (fileUrl ? 'image' : 'text');
+  if (!clean && !fileUrl) return null;
   await set(ref(db, `chats/${chatId}/participants`), {
     [senderId]: true,
     [receiverId]: true
@@ -42,15 +44,19 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
     senderId,
     receiverId,
     text: clean,
-    type,
-    ...(imageUrl ? { imageUrl } : {}),
+    type: attachmentType,
+    ...(fileUrl ? { fileUrl } : {}),
+    ...(attachmentType === 'image' ? { imageUrl: fileUrl } : {}),
+    ...(options.fileName ? { fileName: options.fileName } : {}),
+    ...(options.fileType ? { fileType: options.fileType } : {}),
+    ...(options.fileSize ? { fileSize: Number(options.fileSize) } : {}),
     createdAt,
     delivered: false,
     deliveredAt: null,
     seen: false,
     seenAt: null
   };
-  const preview = clean || (type === 'image' ? '📷 Image' : '');
+  const preview = clean || (attachmentType === 'image' ? '📷 Image' : attachmentType === 'video' ? '🎥 Video' : attachmentType === 'file' ? `📎 ${options.fileName || 'File'}` : '');
 
   const writes = {
     [`chats/${chatId}/messages/${messageId}`]: msg,

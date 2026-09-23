@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
-import { getStorage } from 'firebase/storage';
 
 // These values come straight from Firebase console -> Project settings ->
 // General -> Your apps -> SDK setup and configuration. A Firebase Web
@@ -26,14 +25,12 @@ const firebaseConfig = {
 // here and let App.jsx show a real, readable message instead.
 export let auth = null;
 export let db = null;
-export let storage = null;
 export let firebaseInitError = null;
 
 try {
   const app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getDatabase(app);
-  storage = getStorage(app);
 } catch (e) {
   firebaseInitError = 'Firebase शुरू नहीं हो पाया: ' + (e?.message || String(e));
 }
