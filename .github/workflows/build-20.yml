@@ -1,0 +1,232 @@
+name: Build School Chat APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Install image tooling
+        run: python3 -m pip install --user Pillow
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Restore/create a stable debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: schoolchat-debug-keystore-v1
+
+      - name: Generate the debug key if the cache was empty
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Add Android platform and sync plugins
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Add native Android audio routing for voice-call speaker mode
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          pkg = Path('android/app/src/main/java/com/aditya/schoolchat')
+          pkg.mkdir(parents=True, exist_ok=True)
+          source = Path('native/AudioRouter/AudioRouterPlugin.java').read_text()
+          (pkg / 'AudioRouterPlugin.java').write_text(source)
+          main = pkg / 'MainActivity.java'
+          text = main.read_text()
+          if 'AudioRouterPlugin' not in text:
+              if 'import android.os.Bundle;' not in text:
+                  text = text.replace(
+                      'package com.aditya.schoolchat;\n',
+                      'package com.aditya.schoolchat;\n\nimport android.os.Bundle;\n'
+                  )
+              if 'import com.getcapacitor.BridgeActivity;' not in text:
+                  text = text.replace(
+                      'import android.os.Bundle;\n',
+                      'import android.os.Bundle;\nimport com.getcapacitor.BridgeActivity;\n'
+                  )
+              text = text.replace(
+                  'public class MainActivity extends BridgeActivity {',
+                  'public class MainActivity extends BridgeActivity {\n'
+                  '    @Override\n'
+                  '    public void onCreate(Bundle savedInstanceState) {\n'
+                  '        super.onCreate(savedInstanceState);\n'
+                  '        registerPlugin(AudioRouterPlugin.class);\n'
+                  '    }\n'
+              )
+              main.write_text(text)
+          PY
+
+      - name: Add native Catbox uploader for 15MB media attachments
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          pkg = Path('android/app/src/main/java/com/aditya/schoolchat')
+          pkg.mkdir(parents=True, exist_ok=True)
+          (pkg / 'CatboxUploaderPlugin.java').write_text(
+              Path('native/CatboxUploader/CatboxUploaderPlugin.java').read_text()
+          )
+          main = pkg / 'MainActivity.java'
+          text = main.read_text()
+          if 'CatboxUploaderPlugin' not in text:
+              text = text.replace(
+                  'registerPlugin(AudioRouterPlugin.class);',
+                  'registerPlugin(AudioRouterPlugin.class);\n'
+                  '        registerPlugin(CatboxUploaderPlugin.class);'
+              )
+              main.write_text(text)
+          PY
+
+      - name: Grant Android permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          permissions = [
+              '    <uses-permission android:name="android.permission.INTERNET" />\n',
+              '    <uses-permission android:name="android.permission.CAMERA" />\n',
+              '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n',
+              '    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />\n',
+              '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n'
+          ]
+          for permission in permissions:
+              marker = permission.split('android.permission.')[1].split('"')[0]
+              if marker not in text:
+                  text = text.replace('<application', permission + '    <application', 1)
+          manifest.write_text(text)
+          PY
+
+      - name: Apply School Chat launcher icon
+        run: |
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          res = Path('android/app/src/main/res')
+          src = Image.open('public/school-chat-icon.png').convert('RGBA')
+
+          sizes = {
+              'mipmap-mdpi': 48, 'mipmap-hdpi': 72, 'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144, 'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in sizes.items():
+              out = res / folder
+              out.mkdir(parents=True, exist_ok=True)
+              img = src.resize((size, size), Image.Resampling.LANCZOS)
+              img.save(out / 'ic_launcher.png')
+              img.save(out / 'ic_launcher_round.png')
+
+          fg_sizes = {
+              'mipmap-mdpi': 108, 'mipmap-hdpi': 162, 'mipmap-xhdpi': 216,
+              'mipmap-xxhdpi': 324, 'mipmap-xxxhdpi': 432,
+          }
+          for folder, canvas in fg_sizes.items():
+              out = res / folder
+              inner = int(canvas * 0.66)
+              icon = src.resize((inner, inner), Image.Resampling.LANCZOS)
+              fg = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
+              pos = ((canvas - inner) // 2, (canvas - inner) // 2)
+              fg.paste(icon, pos, icon)
+              fg.save(out / 'ic_launcher_foreground.png')
+
+          values = res / 'values'
+          values.mkdir(parents=True, exist_ok=True)
+          (values / 'ic_launcher_background.xml').write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<resources>\n'
+              '    <color name="ic_launcher_background">#0f6fe8</color>\n'
+              '</resources>\n'
+          )
+
+          anydpi = res / 'mipmap-anydpi-v26'
+          anydpi.mkdir(parents=True, exist_ok=True)
+          adaptive = (
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <background android:drawable="@color/ic_launcher_background"/>\n'
+              '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n'
+              '</adaptive-icon>\n'
+          )
+          (anydpi / 'ic_launcher.xml').write_text(adaptive)
+          (anydpi / 'ic_launcher_round.xml').write_text(adaptive)
+          PY
+
+      - name: Generate native splash screen
+        run: |
+          python3 - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          res = Path('android/app/src/main/res')
+          icon = Image.open('public/school-chat-icon.png').convert('RGBA')
+          size = 1200
+          bg = Image.new('RGBA', (size, size), (15, 111, 232, 255))
+          icon_size = int(size * 0.42)
+          icon_resized = icon.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+          pos = ((size - icon_size) // 2, (size - icon_size) // 2)
+          bg.paste(icon_resized, pos, icon_resized)
+
+          out_dir = res / 'drawable'
+          out_dir.mkdir(parents=True, exist_ok=True)
+          bg.convert('RGB').save(out_dir / 'splash.png')
+
+          night_dir = res / 'drawable-night'
+          night_dir.mkdir(parents=True, exist_ok=True)
+          bg.convert('RGB').save(night_dir / 'splash.png')
+          PY
+
+      - name: Verify web assets
+        run: |
+          if [ ! -f "android/app/src/main/assets/public/index.html" ]; then
+            echo "::error::android/app/src/main/assets/public/index.html नहीं मिली — npx cap sync ने web build कॉपी नहीं की।"
+            exit 1
+          fi
+          echo "Web assets ठीक से Android project में कॉपी हो गए।"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: school-chat-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
