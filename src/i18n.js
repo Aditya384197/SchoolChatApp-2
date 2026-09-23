@@ -38,7 +38,7 @@ export const translations = {
     // Profile edit
     editProfile: 'प्रोफ़ाइल एडिट करें', save: 'सेव करें', emailLoginIdHint: 'लॉगिन आईडी, बदला नहीं जा सकता',
     // Chat / messages
-    online2: 'ऑनलाइन', selectedCount: 'चुने गए', selectAll: 'सभी चुनें', copy: 'कॉपी करें',
+    online2: 'ऑनलाइन', imageCaption: 'फोटो के साथ टिप्पणी लिखें…', lastSeen: 'अंतिम बार', yesterday: 'कल', messageInfo: 'मैसेज की जानकारी', sent: 'भेजा गया', received: 'प्राप्त हुआ', delivered: 'पहुंचा', seen: 'देखा गया', notAvailable: 'उपलब्ध नहीं', gallery: 'गैलरी', camera: 'कैमरा', earpiece: 'कान से', background: 'बैकग्राउंड', backgroundNone: 'कोई पैटर्न नहीं', backgroundPattern: 'पैटर्न', backgroundDots: 'डॉट्स', backgroundGrid: 'ग्रिड', backgroundWaves: 'वेव्स', backgroundDiagonal: 'तिरछी रेखाएँ', selectedCount: 'चुने गए', selectAll: 'सभी चुनें', copy: 'कॉपी करें',
     copied: 'कॉपी हो गया', share: 'शेयर करें', delete: 'हटाएं', confirmDelete: 'रद्द करें',
     // Status
     statusComposerTitle: 'स्टेटस लगाएं', textTab: 'टेक्स्ट', photoTab: 'फ़ोटो', videoTab: 'वीडियो',
@@ -92,7 +92,7 @@ export const translations = {
     block: 'Block', unblock: 'Unblock', chatMenu: 'Menu', clearChat: 'Clear chat', chatLock: 'Chat lock',
     clearChatConfirm: 'This permanently deletes the whole chat (both sides). Sure?', yes: 'Yes', chatLockOn: 'On', chatLockOff: 'Off', slowConnection: 'Your connection looks slow…',
     editProfile: 'Edit profile', save: 'Save', emailLoginIdHint: "your login ID, can't be changed",
-    online2: 'Online', selectedCount: 'selected', selectAll: 'Select all', copy: 'Copy',
+    online2: 'Online', lastSeen: 'Last seen', yesterday: 'Yesterday', messageInfo: 'Message info', sent: 'Sent', received: 'Received', delivered: 'Delivered', seen: 'Seen', notAvailable: 'Not available', gallery: 'Gallery', camera: 'Camera', imageCaption: 'Add a caption…', background: 'Background', backgroundNone: 'None', backgroundPattern: 'Pattern', backgroundDots: 'Dots', backgroundGrid: 'Grid', backgroundWaves: 'Waves', backgroundDiagonal: 'Diagonal', selectedCount: 'selected', selectAll: 'Select all', copy: 'Copy',
     copied: 'Copied', share: 'Share', delete: 'Delete', confirmDelete: 'Cancel',
     statusComposerTitle: 'Add status', textTab: 'Text', photoTab: 'Photo', videoTab: 'Video',
     writeSomething: 'Write something…', writeSomethingError: 'Please write something.', choosePhotoError: 'Please choose a photo.', chooseVideoError: 'Please choose a video.', statusPostFailed: 'Status could not be posted.', choosePhoto: 'Choose a photo', chooseVideo: 'Choose a video (max 15MB)',
@@ -104,7 +104,7 @@ export const translations = {
     pinMismatch: "PINs didn't match, try again", removeAppLock: 'Remove app lock',
     adminControls: 'Admin controls', totalMembers: 'Total members', onlineNowLabel: 'Online now',
     totalChats: 'Total chats', activeNowLabel: 'Active now (last 3 min)', monitorSearchPlaceholder: 'Search by name or number…',
-    allMembers: 'All members', noMembersFound: 'No members found.', allRecordedChats: 'All recorded chats (monitoring)',
+    allMembers: 'All members', noMembersFound: 'No members found.', allRecordedChats: 'All recorded chats',
     noChatsRecorded: 'No chats recorded yet.', noChatsFoundSearch: 'No chats matched your search.',
     noMessagesYet: 'No messages in this chat yet.', noMessage: 'No messages', you: 'You', user: 'User',
     removeConfirmPart1: "? This will erase their profile and all chats from the database, and they won't be able to log in again — but their email/password itself can't be fully deleted from this client-only app, only their access is revoked.",

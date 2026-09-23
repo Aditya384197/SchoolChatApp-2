@@ -6,6 +6,21 @@ export function startPresence(uid) {
   const connectedRef = ref(db, '.info/connected');
   let active = true;
 
+  const setOnlineState = async (online) => {
+    if (!active) return;
+    await set(ref(db, `users/${uid}/online`), online);
+    if (!online) await set(ref(db, `users/${uid}/lastSeen`), serverTimestamp());
+  };
+
+  const onVisibility = () => {
+    if (document.visibilityState === 'visible') {
+      setOnlineState(true).catch(() => {});
+    } else {
+      setOnlineState(false).catch(() => {});
+    }
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+
   const unsubscribe = onValue(connectedRef, async (snapshot) => {
     if (snapshot.val() !== true || !active) return;
     await onDisconnect(ref(db, `users/${uid}/online`)).set(false).catch(() => {});
@@ -17,6 +32,7 @@ export function startPresence(uid) {
   return () => {
     active = false;
     unsubscribe();
+    document.removeEventListener('visibilitychange', onVisibility);
     set(ref(db, `users/${uid}/online`), false).catch(() => {});
     set(ref(db, `users/${uid}/lastSeen`), serverTimestamp()).catch(() => {});
   };

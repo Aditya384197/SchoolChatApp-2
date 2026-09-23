@@ -3,7 +3,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { onValue, ref, update } from 'firebase/database';
 import {
   ArrowLeft, MessageCircle, Search, Send, Phone, PhoneOff, Mic, MicOff, ImagePlus,
-  ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare,
+  ShieldCheck, Users, Wifi, X, LayoutGrid, MessagesSquare, Info, Camera,
   Settings as SettingsIcon, Copy, Share2, Video, Image as ImageIcon, Type as TypeIcon, Volume2,
   Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock
 } from 'lucide-react';
@@ -28,19 +28,16 @@ import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 import { useVoiceCall } from './lib/calls';
-import { setSpeakerRoute } from './lib/audioRoute';
+import { setSpeakerRoute, getAudioRoutes, setAudioRoute } from './lib/audioRoute';
 
 function formatLastSeen(ts, t, lang) {
-  const tr = t || ((k) => k);
-  const locale = lang === 'en' ? 'en-IN' : 'hi-IN';
-  const unavailable = lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
-  if (!ts) return unavailable;
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return unavailable;
-  const diff = Date.now() - date.getTime();
-  if (diff < 60_000) return tr('justOnline');
-  const prefix = lang === 'en' ? 'Last seen' : 'अंतिम बार';
-  return `${prefix} ${date.toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}`;
+  if (!ts) return lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
+  const date = new Date(ts); if (Number.isNaN(date.getTime())) return lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
+  const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate()); const days = Math.round((today-d)/86400000);
+  const time=date.toLocaleTimeString(lang==='en'?'en-IN':'hi-IN',{hour:'2-digit',minute:'2-digit'});
+  if(days===0) return `${t('lastSeen')} ${time}`; if(days===1) return `${t('yesterday')} ${time}`;
+  return `${t('lastSeen')} ${date.toLocaleDateString(lang==='en'?'en-IN':'hi-IN',{day:'2-digit',month:'short',year:'numeric'})}, ${time}`;
 }
 
 // Consistent header used by every settings sub-panel/full-screen: back
@@ -247,29 +244,18 @@ function CompleteProfileScreen({ me }) {
 }
 
 function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, selected, onToggleSelect }) {
-  const mine = message.senderId === me.uid;
-  const pressTimer = useRef(null);
-  function start() { if (!selectionMode) pressTimer.current = setTimeout(() => onLongPress(message), 500); }
-  function stop() { clearTimeout(pressTimer.current); }
-  function tap() {
-    if (selectionMode) { onToggleSelect(message.id); return; }
-    if (!mine) onSeen(message.id);
-  }
-  return (
-    <div
-      className={`bubble ${mine ? 'mine bubble-enter-mine' : 'theirs bubble-enter-theirs'} ${selected ? 'selected' : ''}`}
-      onClick={tap}
-      onPointerDown={start} onPointerUp={stop} onPointerLeave={stop}
-      onContextMenu={e => { e.preventDefault(); onLongPress(message); }}
-    >
-      {message.imageUrl && <img className="message-image" src={message.imageUrl} alt="" loading="lazy" />}
-      {message.text && <div>{message.text}</div>}
-      <div className="message-meta">
-        <span>{message.createdAt ? new Date(message.createdAt).toLocaleTimeString('hi-IN', { hour: '2-digit', minute: '2-digit' }) : '…'}</span>
-        {mine && <span className={`ticks ${message.seen ? 'seen' : ''}`}>{message.delivered ? '✓✓' : '✓'}</span>}
-      </div>
-    </div>
-  );
+  const mine=message.senderId===me.uid, pressTimer=useRef(null);
+  function start(){if(!selectionMode) pressTimer.current=setTimeout(()=>onLongPress(message),500)} function stop(){clearTimeout(pressTimer.current)}
+  function tap(){if(selectionMode){onToggleSelect(message.id);return} if(!mine) onSeen(message.id)}
+  return <div data-message-date={message.createdAt?new Date(message.createdAt).toDateString():''} className={`bubble ${mine?'mine bubble-enter-mine':'theirs bubble-enter-theirs'} ${selected?'selected':''}`} onClick={tap} onPointerDown={start} onPointerUp={stop} onPointerLeave={stop} onContextMenu={e=>{e.preventDefault();onLongPress(message)}}>
+    {message.imageUrl&&<img className="message-image" src={message.imageUrl} alt={message.text||'Image'} loading="lazy"/>}{message.text&&<div>{message.text}</div>}
+    <div className="message-meta"><span>{message.createdAt?new Date(message.createdAt).toLocaleTimeString('hi-IN',{hour:'2-digit',minute:'2-digit'}):'…'}</span>{mine&&<span className={`ticks ${message.seen?'seen':''}`}>{message.delivered?'✓✓':'✓'}</span>}</div>
+  </div>
+}
+
+function MessageInfo({message,me,onClose}){
+  const {t}=usePrefs(); const fmt=ts=>ts?new Date(ts).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):t('notAvailable');
+  return <div className="info-overlay" onClick={onClose}><aside className="message-info" onClick={e=>e.stopPropagation()}><PanelHeader title={t('messageInfo')} onBack={onClose}/><div className="info-message-preview">{message.imageUrl&&<img src={message.imageUrl} alt=""/>}{message.text&&<p>{message.text}</p>}<small>{fmt(message.createdAt)}</small></div><div className="info-list"><div><b>{message.senderId===me.uid?t('sent'):t('received')}</b><span>{fmt(message.createdAt)}</span></div><div><b>{t('delivered')}</b><span>{fmt(message.deliveredAt)}</span></div><div><b>{t('seen')}</b><span>{fmt(message.seenAt)}</span></div></div></aside></div>
 }
 
 function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDeleteForEveryone }) {
@@ -320,10 +306,9 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
   }
 
   return (
-    <div className="msg-actions" onClick={onClose}>
-      <div className="sheet slide-up" onClick={e => e.stopPropagation()}>
-        <div className="sheet-handle" />
-        <button className="danger" onClick={doBlock}><Ban size={18} /> {t('block')}</button>
+    <div className="chat-menu-overlay" onClick={onClose}>
+      <div className="chat-menu-popover" onClick={e => e.stopPropagation()}>
+        <button onClick={doBlock}><Ban size={18} /> {t('block')}</button>
         {confirmClear ? (
           <>
             <p style={{ padding: '0 20px 6px', fontSize: 13 }}>{t('clearChatConfirm')}</p>
@@ -333,7 +318,7 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
           <button onClick={() => setConfirmClear(true)}><Trash2 size={18} /> {t('clearChat')}</button>
         )}
         <button onClick={() => setLockPanel(true)}><Lock size={18} /> {t('chatLock')} <span className="row-end status-text">{locked ? t('chatLockOn') : t('chatLockOff')}</span></button>
-        <button className="cancel" onClick={onClose}>{t('cancel')}</button>
+        <button onClick={onClose}><X size={18} /> {t('cancel')}</button>
       </div>
     </div>
   );
@@ -353,6 +338,11 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showDeleteSheet, setShowDeleteSheet] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
+  const [infoMessage, setInfoMessage] = useState(null);
+  const [activeDate, setActiveDate] = useState('');
+  const [nearBottom, setNearBottom] = useState(true);
+  const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const galleryRef = useRef(null); const cameraRef = useRef(null);
   const [chatUnlocked, setChatUnlocked] = useState(!isChatPinSet(user.uid));
   const [copiedTick, setCopiedTick] = useState(false);
   const listRef = useRef(null);
@@ -459,6 +449,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   }
 
   const visibleMessages = messages.filter(m => !hidden[m.id]);
+  function handleScroll(){const el=listRef.current;if(!el)return;setNearBottom(el.scrollHeight-el.scrollTop-el.clientHeight<80);const nodes=[...el.querySelectorAll('[data-message-date]')];let cur='';for(const n of nodes){if(n.offsetTop-el.scrollTop<=90)cur=n.dataset.messageDate||cur;else break}if(cur)setActiveDate(new Date(cur).toLocaleDateString(lang==='en'?'en-IN':'hi-IN',{day:'numeric',month:'long',year:'numeric'}));}
+  function scrollBottom(){listRef.current?.scrollTo({top:listRef.current.scrollHeight,behavior:'smooth'});}
   const selectedMsgs = visibleMessages.filter(m => selectedIds.has(m.id));
   const allSelected = visibleMessages.length > 0 && selectedIds.size === visibleMessages.length;
   const canDeleteForEveryone = selectedMsgs.length > 0 && selectedMsgs.every(
@@ -526,6 +518,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
           <button className="icon" onClick={selectAll} title={t('selectAll')}><CheckSquare size={20} /></button>
           <button className="icon" onClick={copySelected} title={t('copy')}>{copiedTick ? <Check size={20} /> : <Copy size={20} />}</button>
           <button className="icon" onClick={shareSelected} title={t('share')}><Share2 size={20} /></button>
+          {selectedIds.size===1&&<button className="icon" onClick={()=>setInfoMessage(selectedMsgs[0])} title={t('messageInfo')}><Info size={20}/></button>}
           <button className="icon" onClick={() => setShowDeleteSheet(true)} title={t('delete')}><Trash2 size={20} /></button>
         </header>
       ) : (
@@ -547,7 +540,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
           onBlocked={onBack}
         />
       )}
-      <div className="messages" ref={listRef}>
+      <div className="messages" ref={listRef} onScroll={handleScroll}>
+        {activeDate&&<div className="chat-date-chip">{activeDate}</div>}
         {visibleMessages.map(m => (
           <MessageBubble
             key={m.id} me={me} message={m}
@@ -562,16 +556,20 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       {imagePreview && (
         <div className="chat-attachment-preview">
           <img src={imagePreview} alt="" />
+          <input value={text} onChange={e=>setText(e.target.value)} placeholder={t('imageCaption')} />
           <button type="button" className="icon" onClick={clearChatImage} title={t('removePhoto')}><X size={18} /></button>
         </div>
       )}
       <form className="composer" onSubmit={submit}>
-        <button type="button" className="icon attach-btn" onClick={() => imageInputRef.current?.click()} title={t('sendImage')} disabled={sending}><ImagePlus size={21} /></button>
+        <button type="button" className="icon attach-btn" onClick={() => setImageSourceOpen(true)} title={t('sendImage')} disabled={sending}><ImagePlus size={21} /></button>
         <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder={t('messagePlaceholder')} />
         <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
-      <input ref={imageInputRef} type="file" hidden accept="image/*" capture="environment" onChange={pickChatImage} />
-      {showDeleteSheet && (
+      <input ref={galleryRef} type="file" hidden accept="image/*" onChange={pickChatImage}/><input ref={cameraRef} type="file" hidden accept="image/*" capture="environment" onChange={pickChatImage}/>
+      {imageSourceOpen&&<div className="source-overlay" onClick={()=>setImageSourceOpen(false)}><div className="source-card" onClick={e=>e.stopPropagation()}><b>{t('sendImage')}</b><button onClick={()=>{setImageSourceOpen(false);galleryRef.current?.click()}}><ImageIcon/>{t('gallery')}</button><button onClick={()=>{setImageSourceOpen(false);cameraRef.current?.click()}}><Camera/>{t('camera')}</button><button className="cancel" onClick={()=>setImageSourceOpen(false)}>{t('cancel')}</button></div></div>}
+      {!nearBottom&&<button className="scroll-bottom" onClick={scrollBottom}><ArrowLeft size={17} style={{transform:'rotate(-90deg)'}}/></button>}
+      {infoMessage&&<MessageInfo message={infoMessage} me={me} onClose={()=>setInfoMessage(null)}/>}
+      {showDeleteSheet&&(
         <BulkDeleteSheet
           canDeleteForEveryone={canDeleteForEveryone}
           onClose={() => setShowDeleteSheet(false)}
@@ -590,7 +588,7 @@ function ContactRow({ u, subtitle, statusUids, unread, onOpenStatus, onOpenChat,
   return (
     <div className="user-row">
       <button className={`avatar-wrap ${statusUids.has(u.uid) ? 'has-status' : ''}`} onClick={onOpenStatus}>
-        <Avatar user={u} /> {u.online && <span className="presence-dot" />}
+        <Avatar user={u} />
       </button>
       <button
         className="grow user-row-text" onClick={onOpenChat}
@@ -667,68 +665,19 @@ function IncomingVoiceCall({ call, onAccept, onDecline }) {
   );
 }
 
-function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) {
-  const { t } = usePrefs();
-  const [elapsed, setElapsed] = useState(0);
-  const [speaker, setSpeaker] = useState(false);
-  const audioRef = useRef(null);
-  const startedAt = call.startedAt;
-
-  useEffect(() => {
-    if (!startedAt) { setElapsed(0); return undefined; }
-    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [startedAt]);
-
-  useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.srcObject = remoteStream || null;
-    if (remoteStream) audioRef.current.play().catch(() => {});
-  }, [remoteStream]);
-
-  async function toggleSpeaker() {
-    const next = !speaker;
-    setSpeaker(next);
-    // Chromium/WebView exposes setSinkId only on some devices. Keep the UI
-    // state useful everywhere and use the available output selector when the
-    // platform exposes it; Android WebView otherwise keeps its native call
-    // audio route.
-    try {
-      await setSpeakerRoute(next);
-    } catch {
-      try { if (audioRef.current?.setSinkId) await audioRef.current.setSinkId('default'); } catch {}
-    }
-  }
-
-  const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
-  const secs = String(elapsed % 60).padStart(2, '0');
-  const label = call.status === 'ringing'
-    ? (call.peer?.online ? t('ringing') : t('calling'))
-    : call.status === 'connecting' ? t('connecting') : `${mins}:${secs}`;
-  return (
-    <div className="voice-overlay active-call-overlay">
-      <div className="voice-fullscreen">
-        <div className="call-top-area">
-          <div className="call-avatar-ring"><CallAvatar user={call.peer} /></div>
-          <b className="voice-name">{call.peer?.name || t('user')}</b>
-          <span className="voice-status">{label}</span>
-          {call.status === 'active' && <span className="call-duration">{`${mins}:${secs}`}</span>}
-        </div>
-        <audio ref={audioRef} autoPlay playsInline />
-        <div className="call-controls">
-          <button className={`call-control ${speaker ? 'active' : ''}`} onClick={toggleSpeaker}><Volume2 size={23} /><small>{t('speaker')}</small></button>
-          <button className={`call-control ${muted ? 'active' : ''}`} onClick={onToggleMute}>{muted ? <MicOff size={23} /> : <Mic size={23} />}<small>{muted ? t('unmute') : t('mute')}</small></button>
-          <button className="call-control end" onClick={onHangUp}><PhoneOff size={25} /><small>{t('endCall')}</small></button>
-        </div>
-      </div>
-    </div>
-  );
+function ActiveVoiceCall({call,remoteStream,muted,onToggleMute,onHangUp}){
+  const {t}=usePrefs();const [elapsed,setElapsed]=useState(0);const [route,setRoute]=useState('earpiece');const [routes,setRoutes]=useState({bluetooth:false});const [routeOpen,setRouteOpen]=useState(false);const [minimized,setMinimized]=useState(false);const audioRef=useRef(null);
+  useBackHandler(()=>{if(!minimized){setMinimized(true);return true}return false});
+  useEffect(()=>{if(!call.startedAt){setElapsed(0);return}const id=setInterval(()=>setElapsed(Math.floor((Date.now()-call.startedAt)/1000)),1000);return()=>clearInterval(id)},[call.startedAt]);
+  useEffect(()=>{getAudioRoutes().then(setRoutes)},[]);useEffect(()=>{if(audioRef.current){audioRef.current.srcObject=remoteStream||null;if(remoteStream)audioRef.current.play().catch(()=>{})}},[remoteStream]);
+  async function chooseRoute(r){setRoute(r);setRouteOpen(false);await setAudioRoute(r)}
+  const mins=Math.floor(elapsed/60),secs=String(elapsed%60).padStart(2,'0'),duration=`${mins}:${secs}`,status=call.status==='ringing'?(call.peer?.online?t('ringing'):t('calling')):call.status==='connecting'?t('connecting'):duration;
+  if(minimized)return <button className="mini-call-pill" onClick={()=>setMinimized(false)}><span className="mini-call-icon"><Phone size={15}/></span><span>{call.peer?.name||t('user')}</span><b>{duration}</b></button>;
+  return <div className="voice-overlay active-call-overlay"><div className="voice-fullscreen"><div className="call-top-area"><CallAvatar user={call.peer}/><b className="voice-name">{call.peer?.name||t('user')}</b><span className="voice-status">{status}</span></div><audio ref={audioRef} autoPlay playsInline/><div className="call-controls"><div className="route-wrap"><button className={`call-control ${route==='speaker'?'active':''}`} onClick={()=>setRouteOpen(v=>!v)}><Volume2 size={23}/><small>{route==='bluetooth'?'Bluetooth':route==='speaker'?t('speaker'):t('earpiece')}</small></button>{routeOpen&&<div className="route-menu"><button onClick={()=>chooseRoute('earpiece')}>{t('earpiece')}</button><button onClick={()=>chooseRoute('speaker')}>{t('speaker')}</button>{routes.bluetooth&&<button onClick={()=>chooseRoute('bluetooth')}>Bluetooth</button>}</div>}</div><button className={`call-control ${muted?'active':''}`} onClick={onToggleMute}>{muted?<MicOff size={23}/>:<Mic size={23}/>}<small>{muted?t('unmute'):t('mute')}</small></button><div className="end-wrap"><button className="call-control end" onClick={onHangUp}><PhoneOff size={25}/></button><small className="end-label">{t('endCall')}</small></div></div></div></div>
 }
 
 function AppShell({ me, profile }) {
-  const { t, lang } = usePrefs();
+  const { t, lang, background } = usePrefs();
   const [users, setUsers] = useState([]);
   const [knownContacts, setKnownContacts] = useState({});
   const [adminUid, setAdminUid] = useState(null);
@@ -961,7 +910,7 @@ function AppShell({ me, profile }) {
   }
 
   return (
-    <div className="screen">
+    <div className={`screen app-background-${background}`}>
       <header className="topbar">
         <div className="brand-line">
           <Avatar user={profile} size="sm" />
@@ -982,7 +931,7 @@ function AppShell({ me, profile }) {
           </button>
         )}
 
-        <div className="section-title"><h3>{t('yourContacts')}</h3><span><Wifi size={14} /> {users.filter(u => u.online).length} {t('online')}</span></div>
+        <div className="section-title"><h3>{t('yourContacts')}</h3><span>{users.filter(u => u.online).length} {t('online')}</span></div>
         {filtered.map(u => {
           const subtitle = u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang);
           return (
@@ -1005,7 +954,7 @@ function AppShell({ me, profile }) {
         me={me} profile={profile} adminUser={adminUser}
         onClose={() => setSettings(false)} onOpenChat={setChatUser}
         onOpenAdmin={() => { setSettings(false); setView('admin'); }}
-        onOpenMyStatus={() => { setSettings(false); statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true); }}
+        onOpenMyStatus={() => { statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true); }}
         hasMyStatus={statusUids.has(me.uid)}
       />}
       {statusOwner && <StatusViewer owner={statusOwner} me={me} onClose={() => setStatusOwner(null)} />}
@@ -1150,7 +1099,7 @@ function ProfileEditPanel({ me, profile, onClose }) {
 }
 
 function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, hasMyStatus }) {
-  const { t, lang, setLang, theme, setTheme } = usePrefs();
+  const { t, lang, setLang, theme, setTheme, background, setBackground } = usePrefs();
   const [panel, setPanel] = useState('main');
   const [loggingOut, setLoggingOut] = useState(false);
   const panelRef = useRef(panel);
@@ -1180,6 +1129,10 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
       <button className={theme === 'dark' ? 'active' : ''} onClick={() => { setTheme('dark'); setPanel('main'); }}>{t('themeDark')}</button>
       <button className={theme === 'system' ? 'active' : ''} onClick={() => { setTheme('system'); setPanel('main'); }}>{t('themeSystem')}</button>
     </div>
+  </>;
+  else if (panel === 'background') panelContent = <>
+    <PanelHeader title={t('background')} onBack={() => setPanel('main')} />
+    <div className="theme-options background-options">{['none','dots','grid','waves','diagonal'].map(x=><button key={x} className={background===x?'active':''} onClick={()=>{setBackground(x);setPanel('main')}}>{x==='none'?t('backgroundNone'):x==='dots'?t('backgroundDots'):x==='grid'?t('backgroundGrid'):x==='waves'?t('backgroundWaves'):t('backgroundDiagonal')}</button>)}</div>
   </>;
   else if (panel === 'applock') panelContent = <>
     <PanelHeader title={t('appLock')} onBack={() => setPanel('main')} />
@@ -1212,6 +1165,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
       {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
       <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
       <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('background')}><LayoutGrid /> {t('background')} <span className="row-end status-text">{background==='none'?t('backgroundNone'):t('backgroundPattern')}</span></button>
       <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
       <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> {t('update')} <span className="row-end status-text">v{APP_VERSION}</span></button>
       {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> {t('adminDashboardOpen')} <span className="row-end">›</span></button>}

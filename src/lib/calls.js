@@ -65,6 +65,14 @@ export function useVoiceCall({ uid, users }) {
 
   React.useEffect(() => { activeRef.current = activeCall; }, [activeCall]);
   React.useEffect(() => { incomingRef.current = incomingCall; }, [incomingCall]);
+  React.useEffect(() => {
+    if (!activeCall?.peer?.uid) return undefined;
+    const peerUid = activeCall.peer.uid;
+    return onValue(ref(db, `users/${peerUid}/online`), snap => {
+      const online = snap.val() === true;
+      setActiveCall(prev => prev && prev.peer?.uid === peerUid ? { ...prev, peer: { ...prev.peer, online } } : prev);
+    });
+  }, [activeCall?.peer?.uid]);
 
   function clearTimers() {
     clearTimeout(ringTimerRef.current);

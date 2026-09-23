@@ -46,7 +46,9 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
     ...(imageUrl ? { imageUrl } : {}),
     createdAt,
     delivered: false,
-    seen: false
+    deliveredAt: null,
+    seen: false,
+    seenAt: null
   };
   const preview = clean || (type === 'image' ? '📷 Image' : '');
 
@@ -66,13 +68,13 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
 }
 
 export async function markDelivered(chatId, messageId) {
-  const patch = { delivered: true };
+  const patch = { delivered: true, deliveredAt: serverTimestamp() };
   await update(ref(db, `chats/${chatId}/messages/${messageId}`), patch);
   await update(ref(db, `adminMirror/${chatId}/messages/${messageId}`), patch);
 }
 
 export async function markSeen(chatId, messageId) {
-  const patch = { delivered: true, seen: true };
+  const patch = { delivered: true, deliveredAt: serverTimestamp(), seen: true, seenAt: serverTimestamp() };
   await update(ref(db, `chats/${chatId}/messages/${messageId}`), patch);
   await update(ref(db, `adminMirror/${chatId}/messages/${messageId}`), patch);
 }

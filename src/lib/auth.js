@@ -20,10 +20,10 @@ export async function beginRegistration(email, password, phone = '') {
   const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
   try {
     const normalized = normalizePhone(phone);
-    if (normalized.length !== 10) {
-      throw new Error('कृपया सही 10 अंकों का मोबाइल नंबर दें।');
+    if (normalized && normalized.length !== 10) {
+      throw new Error('कृपया मोबाइल नंबर के 10 अंक सही डालें, या इसे खाली छोड़ दें।');
     }
-    const existingPhone = (await get(ref(db, `phoneIndex/${normalized}`))).val();
+    const existingPhone = normalized ? (await get(ref(db, `phoneIndex/${normalized}`))).val() : null;
     if (existingPhone && existingPhone !== cred.user.uid) {
       throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
     }

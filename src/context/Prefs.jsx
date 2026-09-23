@@ -6,6 +6,7 @@ const PrefsContext = createContext(null);
 export function PrefsProvider({ children }) {
   const [lang, setLangState] = useState(() => localStorage.getItem('schoolChatLang') || 'en');
   const [theme, setThemeState] = useState(() => localStorage.getItem('schoolChatTheme') || 'system');
+  const [background, setBackgroundState] = useState(() => localStorage.getItem('schoolChatBackground') || 'none');
 
   useEffect(() => {
     const root = document.documentElement;
@@ -28,12 +29,13 @@ export function PrefsProvider({ children }) {
 
   function setLang(next) { setLangState(next); localStorage.setItem('schoolChatLang', next); }
   function setTheme(next) { setThemeState(next); localStorage.setItem('schoolChatTheme', next); }
+  function setBackground(next) { setBackgroundState(next); localStorage.setItem('schoolChatBackground', next); }
 
   const dict = translations[lang] || translations.hi;
   const t = (key) => dict[key] || translations.hi[key] || key;
 
   return (
-    <PrefsContext.Provider value={{ lang, setLang, theme, setTheme, t }}>
+    <PrefsContext.Provider value={{ lang, setLang, theme, setTheme, background, setBackground, t }}>
       {children}
     </PrefsContext.Provider>
   );
