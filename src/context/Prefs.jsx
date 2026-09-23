@@ -4,7 +4,7 @@ import { translations } from '../i18n';
 const PrefsContext = createContext(null);
 
 export function PrefsProvider({ children }) {
-  const [lang, setLangState] = useState(() => localStorage.getItem('schoolChatLang') || 'hi');
+  const [lang, setLangState] = useState(() => localStorage.getItem('schoolChatLang') || 'en');
   const [theme, setThemeState] = useState(() => localStorage.getItem('schoolChatTheme') || 'system');
 
   useEffect(() => {
