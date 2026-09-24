@@ -9,6 +9,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.PluginMethod;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -22,7 +23,8 @@ import java.util.concurrent.Executors;
 public class CatboxUploaderPlugin extends Plugin {
     private static final String API_URL = "https://catbox.moe/user/api.php";
     private static final int MAX_BYTES = 15 * 1024 * 1024;
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
+    private static final int CHUNK_BYTES = 64 * 1024;
+    private final ExecutorService executor = Executors.newFixedThreadPool(3);
 
     @PluginMethod
     public void upload(PluginCall call) {
@@ -46,25 +48,50 @@ public class CatboxUploaderPlugin extends Plugin {
                 if (bytes.length > MAX_BYTES) throw new IllegalArgumentException("Files must be 15 MB or smaller.");
 
                 String boundary = "----SchoolChat" + System.currentTimeMillis();
+                byte[] head = (
+                        "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"reqtype\"\r\n\r\n"
+                        + "fileupload\r\n"
+                        + "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"fileToUpload\"; filename=\"" + fileName + "\"\r\n"
+                        + "Content-Type: " + mimeType + "\r\n\r\n"
+                ).getBytes(StandardCharsets.UTF_8);
+                byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+                final long totalLength = (long) head.length + bytes.length + tail.length;
+
                 URL url = new URL(API_URL);
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("POST");
                 connection.setDoOutput(true);
                 connection.setConnectTimeout(20_000);
-                connection.setReadTimeout(90_000);
+                connection.setReadTimeout(120_000);
                 connection.setUseCaches(false);
+                // Stream straight onto the socket instead of letting
+                // HttpURLConnection buffer the whole 15 MB body in memory first.
+                connection.setFixedLengthStreamingMode(totalLength);
                 connection.setRequestProperty("User-Agent", "SchoolChat/1.5.0");
+                connection.setRequestProperty("Connection", "keep-alive");
                 connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
 
-                try (OutputStream out = connection.getOutputStream()) {
-                    writeText(out, "--" + boundary + "\r\n");
-                    writeText(out, "Content-Disposition: form-data; name=\"reqtype\"\r\n\r\n");
-                    writeText(out, "fileupload\r\n");
-                    writeText(out, "--" + boundary + "\r\n");
-                    writeText(out, "Content-Disposition: form-data; name=\"fileToUpload\"; filename=\"" + fileName + "\"\r\n");
-                    writeText(out, "Content-Type: " + mimeType + "\r\n\r\n");
-                    out.write(bytes);
-                    writeText(out, "\r\n--" + boundary + "--\r\n");
+                try (OutputStream raw = connection.getOutputStream();
+                     BufferedOutputStream out = new BufferedOutputStream(raw, CHUNK_BYTES)) {
+                    out.write(head);
+                    int offset = 0;
+                    long lastReport = 0;
+                    while (offset < bytes.length) {
+                        int count = Math.min(CHUNK_BYTES, bytes.length - offset);
+                        out.write(bytes, offset, count);
+                        offset += count;
+                        long now = System.currentTimeMillis();
+                        if (now - lastReport > 120 || offset == bytes.length) {
+                            lastReport = now;
+                            JSObject progress = new JSObject();
+                            progress.put("sent", offset);
+                            progress.put("total", bytes.length);
+                            notifyListeners("uploadProgress", progress);
+                        }
+                    }
+                    out.write(tail);
                     out.flush();
                 }
 
@@ -108,7 +135,7 @@ public class CatboxUploaderPlugin extends Plugin {
 
     private static String sanitizeFileName(String input) {
         String name = input == null || input.trim().isEmpty() ? "upload.bin" : input.trim();
-        name = name.replace('\\', '_').replace('/', '_').replace('\r', '_').replace('\n', '_');
+        name = name.replace('\\', '_').replace('/', '_').replace('"', '_').replace('\r', '_').replace('\n', '_');
         return name.length() > 180 ? name.substring(0, 180) : name;
     }
 

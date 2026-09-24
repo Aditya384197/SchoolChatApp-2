@@ -176,3 +176,39 @@ export async function logout() {
     new Promise(resolve => setTimeout(resolve, 4000)),
   ]);
 }
+
+// ---- Custom user ID -------------------------------------------------------
+// A user may pick their own ID, but it must mix letters AND digits so it can't
+// be a plain word/number that is easy to guess. Letters, digits and "_" only.
+export const USER_ID_MIN = 4;
+export const USER_ID_MAX = 20;
+
+export function validateUserId(raw) {
+  const id = String(raw || '').trim();
+  if (id.length < USER_ID_MIN || id.length > USER_ID_MAX) return 'length';
+  if (!/^[A-Za-z0-9_]+$/.test(id)) return 'chars';
+  if (!/[A-Za-z]/.test(id) || !/[0-9]/.test(id)) return 'mix';
+  return null; // valid
+}
+
+// Claims the new ID (unique across everyone), then points the profile at it
+// and releases the old one. Stored in capitals because look-ups are exact,
+// case-insensitive matches on the capitalised key.
+export async function changeUserCode(uid, oldCode, rawNewCode) {
+  const problem = validateUserId(rawNewCode);
+  if (problem) { const e = new Error('USER_ID_INVALID'); e.code = `user-id-${problem}`; throw e; }
+  const next = String(rawNewCode).trim().toUpperCase();
+  const prev = String(oldCode || '').trim().toUpperCase();
+  if (next === prev) return next;
+
+  const result = await runTransaction(ref(db, `userCodeIndex/${next}`), current => {
+    if (current !== null && current !== uid) return; // someone else already owns it -> abort
+    return uid;
+  });
+  if (!result.committed || result.snapshot.val() !== uid) {
+    const e = new Error('USER_ID_TAKEN'); e.code = 'user-id-taken'; throw e;
+  }
+  await update(ref(db, `users/${uid}`), { userCode: next });
+  if (prev) await remove(ref(db, `userCodeIndex/${prev}`)).catch(() => {}); // needs the updated rules; harmless if not yet deployed
+  return next;
+}

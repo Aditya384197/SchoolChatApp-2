@@ -45,7 +45,7 @@
     "userCodeIndex": {
       "$code": {
         ".read": "auth != null",
-        ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid) || (!newData.exists() && auth.uid === root.child('config').child('adminUid').val()))"
+        ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid) || (!newData.exists() && (data.val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())))"
       }
     },
     "blocks": {

@@ -5,10 +5,11 @@ import {
   ArrowLeft, MessageCircle, Search, Send, Phone, PhoneOff, Mic, MicOff, ImagePlus,
   ShieldCheck, Users, X, LayoutGrid, MessagesSquare, Info, Camera,
   Settings as SettingsIcon, Copy, Share2, Video, File as FileIcon, Image as ImageIcon, Type as TypeIcon, Volume2,
-  Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock
+  Trash2, CheckSquare, Check, LogOut, User, RefreshCw, Ban, MoreVertical, Lock,
+  ChevronDown, Bluetooth, Smartphone, Pencil
 } from 'lucide-react';
 import { auth, db, firebaseInitError } from './firebase';
-import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile } from './lib/auth';
+import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile, changeUserCode, validateUserId } from './lib/auth';
 import {
   chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage, createMessageId,
   deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS, clearChat
@@ -20,10 +21,13 @@ import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification, listenNotificationActions } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
 import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
-import { usePrefs } from './context/Prefs';
+import { usePrefs, localeFor, LANGUAGES } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
-import { postStatus, cleanupExpiredStatus } from './lib/status';
-import { uploadStatusMedia, uploadChatMedia, getAttachmentKind, deleteChatImage } from './lib/media';
+import { postStatus, cleanupExpiredStatus, listenActiveStatusOwners, listenStatus, MAX_ACTIVE_STATUS } from './lib/status';
+import { MediaViewer, ChatImage, VideoThumb } from './components/MediaViewer';
+import { VideoEditor } from './components/VideoEditor';
+import { MyStatusPanel } from './components/MyStatusPanel';
+import { uploadStatusMedia, uploadChatMedia, getAttachmentKind, deleteChatImage, prefetchMedia } from './lib/media';
 import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
@@ -31,13 +35,14 @@ import { useVoiceCall } from './lib/calls';
 import { getAudioRoutes, setAudioRoute } from './lib/audioRoute';
 
 function formatLastSeen(ts, t, lang) {
-  if (!ts) return lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
-  const date = new Date(ts); if (Number.isNaN(date.getTime())) return lang === 'en' ? 'Last seen unavailable' : 'अंतिम बार उपलब्ध नहीं';
+  const unavailable = `${t('lastSeen')} ${t('notAvailable')}`;
+  if (!ts) return unavailable;
+  const date = new Date(ts); if (Number.isNaN(date.getTime())) return unavailable;
   const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate()); const days = Math.round((today-d)/86400000);
-  const time=date.toLocaleTimeString(lang==='en'?'en-IN':'hi-IN',{hour:'2-digit',minute:'2-digit'});
+  const loc=localeFor(lang); const time=date.toLocaleTimeString(loc,{hour:'2-digit',minute:'2-digit'});
   if(days===0) return `${t('lastSeen')} ${time}`; if(days===1) return `${t('yesterday')} ${time}`;
-  return `${t('lastSeen')} ${date.toLocaleDateString(lang==='en'?'en-IN':'hi-IN',{day:'2-digit',month:'short',year:'numeric'})}, ${time}`;
+  return `${t('lastSeen')} ${date.toLocaleDateString(loc,{day:'2-digit',month:'short',year:'numeric'})}, ${time}`;
 }
 
 // Consistent header used by every settings sub-panel/full-screen: back
@@ -243,15 +248,21 @@ function CompleteProfileScreen({ me }) {
   );
 }
 
-function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, selected, onToggleSelect }) {
+function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, selected, onToggleSelect, onOpenMedia }) {
   const mine=message.senderId===me.uid, pressTimer=useRef(null);
   function start(){if(!selectionMode) pressTimer.current=setTimeout(()=>onLongPress(message),500)} function stop(){clearTimeout(pressTimer.current)}
   function tap(){if(selectionMode){onToggleSelect(message.id);return} if(!mine) onSeen(message.id)}
   const attachmentType = message.type || (message.imageUrl ? 'image' : 'text');
   const attachmentUrl = message.fileUrl || message.imageUrl || '';
+  function openMedia(e, kind) {
+    if (selectionMode) return; // in selection mode a tap just toggles the selection
+    e.stopPropagation();
+    if (!mine) onSeen(message.id);
+    onOpenMedia?.({ kind, url: attachmentUrl, caption: message.text || '' });
+  }
   return <div data-message-date={message.createdAt?new Date(message.createdAt).toDateString():''} className={`bubble ${mine?'mine bubble-enter-mine':'theirs bubble-enter-theirs'} ${selected?'selected':''}`} onClick={tap} onPointerDown={start} onPointerUp={stop} onPointerLeave={stop} onContextMenu={e=>{e.preventDefault();onLongPress(message)}}>
-    {attachmentType==='image' && attachmentUrl && <img className="message-image" src={attachmentUrl} alt={message.text||'Image'} loading="lazy"/>}
-    {attachmentType==='video' && attachmentUrl && <video className="message-video" src={attachmentUrl} controls playsInline preload="metadata"/>}
+    {attachmentType==='image' && attachmentUrl && <ChatImage url={attachmentUrl} alt={message.text||'Image'} onOpen={e=>openMedia(e,'image')}/>}
+    {attachmentType==='video' && attachmentUrl && <VideoThumb url={attachmentUrl} onOpen={e=>openMedia(e,'video')}/>}
     {attachmentType==='file' && attachmentUrl && <a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>📎 <span>{message.fileName||'File'}</span></a>}
     {message.text&&<div>{message.text}</div>}
     <div className="message-meta"><span>{message.createdAt?new Date(message.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'…'}</span>{mine&&<span className={`ticks ${message.seen?'seen':''}`}>{message.delivered?'✓✓':'✓'}</span>}</div>
@@ -302,9 +313,11 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
       <div className="overlay" onClick={onClose}>
         <aside className="drawer" onClick={e => e.stopPropagation()}>
           <PanelHeader title={t('chatLock')} onBack={() => setLockPanel(false)} />
-          {locked
-            ? <PinPad mode="change" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />
-            : <PinPad mode="set" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />}
+          <div className="pin-page">
+            {locked
+              ? <PinPad mode="change" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />
+              : <PinPad mode="set" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />}
+          </div>
           {locked && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearChatPin(user.uid); setLockPanel(false); }}>{t('removeAppLock')}</button>}
         </aside>
       </div>
@@ -324,7 +337,7 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
           <button onClick={() => setConfirmClear(true)}><Trash2 size={18} /> {t('clearChat')}</button>
         )}
         <button onClick={() => setLockPanel(true)}><Lock size={18} /> {t('chatLock')} <span className="row-end status-text">{locked ? t('chatLockOn') : t('chatLockOff')}</span></button>
-        <button onClick={onClose}><X size={18} /> {t('cancel')}</button>
+        <button onClick={onClose}><ArrowLeft size={18} /> {t('back')}</button>
       </div>
     </div>
   );
@@ -349,6 +362,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const [activeDate, setActiveDate] = useState('');
   const [nearBottom, setNearBottom] = useState(true);
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [viewerMedia, setViewerMedia] = useState(null);
+  const [uploadPct, setUploadPct] = useState(null);
   const galleryRef = useRef(null); const cameraRef = useRef(null);
   const [chatUnlocked, setChatUnlocked] = useState(!isChatPinSet(user.uid));
   const [copiedTick, setCopiedTick] = useState(false);
@@ -377,6 +392,16 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     }
     return () => { active = false; };
   }, [messages, me.uid, chatId]);
+
+  // Received photos/videos start downloading the moment they arrive (like
+  // WhatsApp), so opening them later is instant.
+  useEffect(() => {
+    messages.forEach(m => {
+      if (m.receiverId !== me.uid) return;
+      const kind = m.type || (m.imageUrl ? 'image' : '');
+      if (kind === 'image' || kind === 'video') prefetchMedia(m.fileUrl || m.imageUrl, kind);
+    });
+  }, [messages, me.uid]);
 
   useEffect(() => {
     clearUnread(me.uid, chatId).catch(() => {});
@@ -444,7 +469,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       const messageId = createMessageId(chatId);
       clearChatAttachment();
       try {
-        const uploaded = await uploadChatMedia(me.uid, chatId, messageId, file);
+        const uploaded = await uploadChatMedia(me.uid, chatId, messageId, file, setUploadPct);
         await sendMessage(chatId, me.uid, user.uid, value, {
           type: kind,
           fileUrl: uploaded.url,
@@ -457,6 +482,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
         setImageError(error?.message || 'File could not be sent. Please try again.');
         setText(value);
         setSending(false);
+        setUploadPct(null);
         setAttachmentFile(file);
         setAttachmentKind(kind);
         setAttachmentPreview(kind === 'image' || kind === 'video' ? URL.createObjectURL(file) : '');
@@ -466,11 +492,12 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       sendMessage(chatId, me.uid, user.uid, value).catch(() => {});
     }
     setSending(false);
+    setUploadPct(null);
     inputRef.current?.focus();
   }
 
   const visibleMessages = messages.filter(m => !hidden[m.id]);
-  function handleScroll(){const el=listRef.current;if(!el)return;setNearBottom(el.scrollHeight-el.scrollTop-el.clientHeight<80);const nodes=[...el.querySelectorAll('[data-message-date]')];let cur='';for(const n of nodes){if(n.offsetTop-el.scrollTop<=90)cur=n.dataset.messageDate||cur;else break}if(cur)setActiveDate(new Date(cur).toLocaleDateString(lang==='en'?'en-IN':'hi-IN',{day:'numeric',month:'long',year:'numeric'}));}
+  function handleScroll(){const el=listRef.current;if(!el)return;setNearBottom(el.scrollHeight-el.scrollTop-el.clientHeight<80);const nodes=[...el.querySelectorAll('[data-message-date]')];let cur='';for(const n of nodes){if(n.offsetTop-el.scrollTop<=90)cur=n.dataset.messageDate||cur;else break}if(cur)setActiveDate(new Date(cur).toLocaleDateString(localeFor(lang),{day:'numeric',month:'long',year:'numeric'}));}
   function scrollBottom(){listRef.current?.scrollTo({top:listRef.current.scrollHeight,behavior:'smooth'});}
   const selectedMsgs = visibleMessages.filter(m => selectedIds.has(m.id));
   const allSelected = visibleMessages.length > 0 && selectedIds.size === visibleMessages.length;
@@ -569,11 +596,13 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
             onSeen={id => markSeen(chatId, id).catch(() => {})}
             onLongPress={msg => setSelectedIds(new Set([msg.id]))}
             selectionMode={selectionMode} selected={selectedIds.has(m.id)} onToggleSelect={toggleSelect}
+            onOpenMedia={setViewerMedia}
           />
         ))}
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
       </div>
       {imageError && <div className="error chat-image-error">{imageError}</div>}
+      {sending && uploadPct !== null && <div className="upload-progress"><span style={{ width: `${Math.round(uploadPct * 100)}%` }} /><small>{t('uploading')} {Math.round(uploadPct * 100)}%</small></div>}
       {attachmentFile && (
         <div className="chat-attachment-preview">
           {attachmentKind === 'image' && attachmentPreview && <img src={attachmentPreview} alt="" />}
@@ -592,6 +621,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       {imageSourceOpen&&<div className="source-overlay" onClick={()=>setImageSourceOpen(false)}><div className="source-card" onClick={e=>e.stopPropagation()}><b>Attach file</b><button onClick={()=>{setImageSourceOpen(false);cameraRef.current?.click()}}><Camera/>Camera</button><button onClick={()=>{setImageSourceOpen(false);galleryRef.current?.click()}}><ImageIcon/>Gallery</button><button onClick={()=>{setImageSourceOpen(false);fileInputRef.current?.click()}}><FileIcon/>Files</button><button className="cancel" onClick={()=>setImageSourceOpen(false)}>Cancel</button></div></div>}
       {!nearBottom&&<button className="scroll-bottom" onClick={scrollBottom}><ArrowLeft size={17} style={{transform:'rotate(-90deg)'}}/></button>}
       {infoMessage&&<MessageInfo message={infoMessage} me={me} onClose={()=>setInfoMessage(null)}/>}
+      {viewerMedia&&<MediaViewer kind={viewerMedia.kind} url={viewerMedia.url} caption={viewerMedia.caption} onClose={()=>setViewerMedia(null)}/>}
       {showDeleteSheet&&(
         <BulkDeleteSheet
           canDeleteForEveryone={canDeleteForEveryone}
@@ -654,6 +684,48 @@ function CallAvatar({ user }) {
   return <Avatar user={user} size="lg" />;
 }
 
+// Small "call in progress" pill shown while the call screen is minimised.
+// Sits in the bottom-left corner by default; drag it to any corner and it
+// snaps there (and remembers the choice).
+function MiniCallPill({ name, duration, onRestore }) {
+  const [corner, setCorner] = useState(() => localStorage.getItem('schoolChatMiniCallCorner') || 'bl');
+  const [drag, setDrag] = useState(null);
+  const ref = useRef(null);
+  const st = useRef({ down: false, moved: false, sx: 0, sy: 0, ox: 0, oy: 0 });
+  function down(e) {
+    const r = ref.current.getBoundingClientRect();
+    st.current = { down: true, moved: false, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }
+  function move(e) {
+    const s = st.current;
+    if (!s.down) return;
+    const dx = e.clientX - s.sx; const dy = e.clientY - s.sy;
+    if (!s.moved && Math.hypot(dx, dy) > 8) s.moved = true;
+    if (s.moved) setDrag({ x: s.ox + dx, y: s.oy + dy });
+  }
+  function up() {
+    const s = st.current;
+    if (!s.down) return;
+    s.down = false;
+    if (!s.moved) { onRestore(); return; }
+    const r = ref.current.getBoundingClientRect();
+    const right = r.left + r.width / 2 > window.innerWidth / 2;
+    const bottom = r.top + r.height / 2 > window.innerHeight / 2;
+    const next = `${bottom ? 'b' : 't'}${right ? 'r' : 'l'}`;
+    setCorner(next);
+    localStorage.setItem('schoolChatMiniCallCorner', next);
+    setDrag(null);
+  }
+  return (
+    <button ref={ref} className={`mini-call-pill corner-${corner}${drag ? ' dragging' : ''}`}
+      style={drag ? { left: drag.x, top: drag.y, right: 'auto', bottom: 'auto' } : undefined}
+      onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+      <span className="mini-call-icon"><Phone size={15} /></span><span className="mini-call-name">{name}</span><b>{duration}</b>
+    </button>
+  );
+}
+
 function IncomingVoiceCall({ call, onAccept, onDecline }) {
   const { t } = usePrefs();
   const peer = call.peer || { uid: call.callerId, name: 'School Chat' };
@@ -673,27 +745,41 @@ function IncomingVoiceCall({ call, onAccept, onDecline }) {
     return () => { stopped = true; clearInterval(timer); try { ctx?.close(); } catch {} };
   }, []);
   return (
-    <div className="voice-overlay">
-      <div className="voice-card incoming">
-        <Phone size={22} className="voice-top-icon" />
-        <CallAvatar user={peer} />
-        <b className="voice-name">{peer.name}</b>
-        <span className="voice-status">{t('incomingVoiceCall')}</span>
-        <div className="voice-actions two">
-          <button className="voice-action decline" onClick={() => onDecline(call)}><PhoneOff size={22} /></button>
-          <button className="voice-action accept" onClick={() => onAccept(call)}><Phone size={22} /></button>
+    <div className="voice-overlay call2">
+      <div className="call2-bg" />
+      <div className="call2-body">
+        <div className="call2-top"><span className="call2-badge"><Phone size={13} /> {t('incomingVoiceCall')}</span></div>
+        <div className="call2-center">
+          <div className="call2-avatar ring"><CallAvatar user={peer} /></div>
+          <b className="call2-name">{peer.name}</b>
+          <span className="call2-status">School Chat</span>
+        </div>
+        <div className="call2-actions two">
+          <div className="call2-act"><button className="call2-btn decline" onClick={() => onDecline(call)}><PhoneOff size={28} /></button><small>{t('decline')}</small></div>
+          <div className="call2-act"><button className="call2-btn accept" onClick={() => onAccept(call)}><Phone size={28} /></button><small>{t('accept')}</small></div>
         </div>
       </div>
     </div>
   );
 }
 
-function ActiveVoiceCall({call,remoteStream,muted,onToggleMute,onHangUp}){
-  const {t}=usePrefs();const [elapsed,setElapsed]=useState(0);const [route,setRoute]=useState('earpiece');const [routes,setRoutes]=useState({bluetooth:false});const [routeOpen,setRouteOpen]=useState(false);const [minimized,setMinimized]=useState(false);const audioRef=useRef(null);const routeRef=useRef('earpiece');
-  useBackHandler(()=>{if(!minimized){setMinimized(true);return true}return false});
-  useEffect(()=>{routeRef.current=route},[route]);
-  useEffect(()=>{if(!call.startedAt){setElapsed(0);return}const id=setInterval(()=>setElapsed(Math.floor((Date.now()-call.startedAt)/1000)),1000);return()=>clearInterval(id)},[call.startedAt]);
-  useEffect(()=>{
+function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) {
+  const { t } = usePrefs();
+  const [elapsed, setElapsed] = useState(0);
+  const [route, setRoute] = useState('earpiece');
+  const [routes, setRoutes] = useState({ bluetooth: false });
+  const [routeOpen, setRouteOpen] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const audioRef = useRef(null);
+  const routeRef = useRef('earpiece');
+  useBackHandler(() => { if (!minimized) { setMinimized(true); return true; } return false; });
+  useEffect(() => { routeRef.current = route; }, [route]);
+  useEffect(() => {
+    if (!call.startedAt) { setElapsed(0); return undefined; }
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - call.startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [call.startedAt]);
+  useEffect(() => {
     let live = true;
     const refresh = () => getAudioRoutes().then(value => {
       if (!live) return;
@@ -708,20 +794,65 @@ function ActiveVoiceCall({call,remoteStream,muted,onToggleMute,onHangUp}){
     refresh();
     const timer = setInterval(refresh, 2000);
     return () => { live = false; clearInterval(timer); };
-  },[]);
-  useEffect(()=>{if(audioRef.current){audioRef.current.srcObject=remoteStream||null;if(remoteStream)audioRef.current.play().catch(()=>{})}},[remoteStream]);
-  async function chooseRoute(r){
+  }, []);
+  useEffect(() => { if (audioRef.current) { audioRef.current.srcObject = remoteStream || null; if (remoteStream) audioRef.current.play().catch(() => {}); } }, [remoteStream]);
+  async function chooseRoute(r) {
     const ok = await setAudioRoute(r);
     if (ok) { setRoute(r); setRouteOpen(false); }
   }
-  async function toggleOutput(){
-    if(routes.bluetooth){setRouteOpen(v=>!v);return;}
-    const next=route==='speaker'?'earpiece':'speaker';
-    await chooseRoute(next);
+  async function toggleOutput() {
+    if (routes.bluetooth) { setRouteOpen(v => !v); return; }
+    await chooseRoute(route === 'speaker' ? 'earpiece' : 'speaker');
   }
-  const mins=Math.floor(elapsed/60),secs=String(elapsed%60).padStart(2,'0'),duration=`${mins}:${secs}`,status=call.status==='ringing'?(call.peer?.online?'Ringing…':'Calling…'):call.status==='connecting'?'Connecting…':duration;
-  if(minimized)return <button className="mini-call-pill" onClick={()=>setMinimized(false)}><span className="mini-call-icon"><Phone size={15}/></span><span>{call.peer?.name||t('user')}</span><b>{duration}</b></button>;
-  return <div className="voice-overlay active-call-overlay"><div className="voice-fullscreen"><div className="call-top-area"><CallAvatar user={call.peer}/><b className="voice-name">{call.peer?.name||t('user')}</b><span className="voice-status">{status}</span></div><audio ref={audioRef} autoPlay playsInline/><div className="call-controls"><div className="route-wrap"><button className={`call-control ${route==='speaker'?'active':''}`} onClick={toggleOutput}><Volume2 size={23}/><small>{route==='bluetooth'?'Bluetooth':route==='speaker'?'Speaker':'Earpiece'}</small></button>{routeOpen&&routes.bluetooth&&<div className="route-menu"><button onClick={()=>chooseRoute('Earpiece'.toLowerCase())}>Earpiece</button><button onClick={()=>chooseRoute('speaker')}>Speaker</button><button onClick={()=>chooseRoute('bluetooth')}>Bluetooth</button></div>}</div><button className={`call-control ${muted?'active':''}`} onClick={onToggleMute}>{muted?<MicOff size={23}/>:<Mic size={23}/>}<small>{muted?'Unmute':'Mute'}</small></button><div className="end-wrap"><button className="call-control end" onClick={onHangUp}><Phone size={25} style={{transform:'rotate(135deg)'}}/></button><small className="end-label">End</small></div></div></div></div>
+  const mins = Math.floor(elapsed / 60);
+  const secs = String(elapsed % 60).padStart(2, '0');
+  const duration = `${mins}:${secs}`;
+  const connected = call.status !== 'ringing' && call.status !== 'connecting';
+  const status = call.status === 'ringing' ? (call.peer?.online ? t('ringing') : t('calling')) : call.status === 'connecting' ? t('connecting') : duration;
+  const name = call.peer?.name || t('user');
+  const RouteIcon = route === 'bluetooth' ? Bluetooth : route === 'speaker' ? Volume2 : Smartphone;
+  const routeLabel = route === 'bluetooth' ? t('bluetooth') : route === 'speaker' ? t('speaker') : t('earpiece');
+
+  if (minimized) return <MiniCallPill name={name} duration={duration} onRestore={() => setMinimized(false)} />;
+  return (
+    <div className="voice-overlay call2 active-call-overlay">
+      <div className="call2-bg" />
+      <div className="call2-body">
+        <div className="call2-top">
+          <button className="call2-min" onClick={() => setMinimized(true)} aria-label={t('back')}><ChevronDown size={28} /></button>
+          <span className="call2-badge"><Lock size={12} /> School Chat</span>
+          <span className="call2-min-spacer" />
+        </div>
+        <div className="call2-center">
+          <div className={`call2-avatar ${connected ? 'live' : 'ring'}`}><CallAvatar user={call.peer} /></div>
+          <b className="call2-name">{name}</b>
+          <span className={`call2-status ${connected ? 'live' : ''}`}>{status}</span>
+        </div>
+        <audio ref={audioRef} autoPlay playsInline />
+        <div className="call2-actions">
+          <div className="call2-act route-wrap">
+            <button className={`call2-btn ${route !== 'earpiece' ? 'on' : ''}`} onClick={toggleOutput}><RouteIcon size={26} /></button>
+            <small>{routeLabel}</small>
+            {routeOpen && routes.bluetooth && (
+              <div className="route-menu">
+                <button onClick={() => chooseRoute('earpiece')}><Smartphone size={16} /> {t('earpiece')}</button>
+                <button onClick={() => chooseRoute('speaker')}><Volume2 size={16} /> {t('speaker')}</button>
+                <button onClick={() => chooseRoute('bluetooth')}><Bluetooth size={16} /> {t('bluetooth')}</button>
+              </div>
+            )}
+          </div>
+          <div className="call2-act">
+            <button className={`call2-btn ${muted ? 'on' : ''}`} onClick={onToggleMute}>{muted ? <MicOff size={26} /> : <Mic size={26} />}</button>
+            <small>{muted ? t('unmute') : t('mute')}</small>
+          </div>
+          <div className="call2-act">
+            <button className="call2-btn end" onClick={onHangUp}><PhoneOff size={28} /></button>
+            <small>{t('endCall')}</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AppShell({ me, profile }) {
@@ -742,6 +873,7 @@ function AppShell({ me, profile }) {
   useBackHandler(view === 'admin' ? () => setView('chats') : null);
   const [statusUids, setStatusUids] = useState(new Set());
   const [statusOwner, setStatusOwner] = useState(null); // whose status is being viewed
+  const [statusStart, setStatusStart] = useState(0);
   const [composing, setComposing] = useState(false);
   const voiceCall = useVoiceCall({ uid: me.uid, users });
 
@@ -799,7 +931,7 @@ function AppShell({ me, profile }) {
     const q = query.trim();
     setDiscovered(null);
     const looksLikeEmail = q.includes('@') && q.includes('.') && q.length > 5;
-    const looksLikeCode = /^SC-[A-Z0-9]{4,8}$/i.test(q);
+    const looksLikeCode = /^[A-Za-z0-9_-]{4,24}$/.test(q) && (/\d/.test(q) || /^SC-/i.test(q)); // old SC-XXXXXX ids or a custom id (letters + digits)
     if (!looksLikeEmail && !looksLikeCode) return undefined;
     let cancelled = false;
     const timer = setTimeout(async () => {
@@ -864,15 +996,10 @@ function AppShell({ me, profile }) {
     return () => stop?.();
   }, [me.uid, notificationsReady, t]);
 
-  useEffect(() => onValue(ref(db, 'statuses'), snap => {
-    const all = snap.val() || {};
-    const now = Date.now();
-    const withActive = new Set();
-    Object.entries(all).forEach(([uid, list]) => {
-      if (Object.values(list || {}).some(s => s.expiresAt > now)) withActive.add(uid);
-    });
-    setStatusUids(withActive);
-  }), []);
+  // Who has a live status (green ring). Rules only allow reading statuses/{uid}
+  // one user at a time, so listen per user instead of the whole /statuses tree.
+  const statusWatchKey = users.map(u => u.uid).sort().join(',');
+  useEffect(() => listenActiveStatusOwners([me.uid, ...users.map(u => u.uid)], setStatusUids), [me.uid, statusWatchKey]);
 
   // One listener per contact does double duty: foreground notifications for
   // incoming messages, and the last-message preview + recency sort in the
@@ -885,6 +1012,10 @@ function AppShell({ me, profile }) {
         const data = snap.val() || {};
         const list = Object.entries(data).map(([id, m]) => ({ id, ...m })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
         const latest = list[list.length - 1];
+        if (latest && latest.receiverId === me.uid && !latest.seen) {
+          const kind = latest.type || (latest.imageUrl ? 'image' : '');
+          if (kind === 'image' || kind === 'video') prefetchMedia(latest.fileUrl || latest.imageUrl, kind); // auto-download
+        }
         if (latest) {
           setPreviews(prev => ({ ...prev, [chatId]: { text: latest.text, mine: latest.senderId === me.uid, at: latest.createdAt || 0 } }));
         }
@@ -995,7 +1126,7 @@ function AppShell({ me, profile }) {
           return (
             <ContactRow key={u.uid} u={u} subtitle={subtitle} statusUids={statusUids}
               unread={unread[chatIdFor(me.uid, u.uid)]}
-              onOpenStatus={() => setStatusOwner(u)} onOpenChat={() => setChatUser(u)}
+              onOpenStatus={() => { setStatusStart(0); setStatusOwner(u); }} onOpenChat={() => setChatUser(u)}
               onLongPress={() => setContactAction(u)}
             />
           );
@@ -1012,10 +1143,11 @@ function AppShell({ me, profile }) {
         me={me} profile={profile} adminUser={adminUser}
         onClose={() => setSettings(false)} onOpenChat={setChatUser}
         onOpenAdmin={() => { setSettings(false); setView('admin'); }}
-        onOpenMyStatus={() => { statusUids.has(me.uid) ? setStatusOwner(profile) : setComposing(true); }}
+        onOpenMyStatus={(i = 0) => { setStatusStart(i); setStatusOwner({ ...profile, uid: me.uid }); }}
+        onAddStatus={() => setComposing(true)}
         hasMyStatus={statusUids.has(me.uid)}
       />}
-      {statusOwner && <StatusViewer owner={statusOwner} me={me} onClose={() => setStatusOwner(null)} />}
+      {statusOwner && <StatusViewer key={statusOwner.uid} owner={statusOwner} me={me} startIndex={statusStart} onClose={() => setStatusOwner(null)} />}
       {composing && <StatusComposer me={me} onClose={() => setComposing(false)} />}
       {isAdmin && <AdminTabBar view={view} setView={setView} />}
       {callUi}
@@ -1025,16 +1157,23 @@ function AppShell({ me, profile }) {
 
 function StatusComposer({ me, onClose }) {
   const { t } = usePrefs();
-  useBackHandler(onClose);
   const [tab, setTab] = useState('text');
   const [text, setText] = useState('');
   const [bg, setBg] = useState('#0f6fe8');
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pct, setPct] = useState(0);
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [edit, setEdit] = useState(null); // { segments, duration, overlay } from the video editor
+  const [videoDur, setVideoDur] = useState(0);
+  const [activeCount, setActiveCount] = useState(0);
   const fileRef = useRef(null);
   const BG_CHOICES = ['#0f6fe8', '#16a34a', '#dc2626', '#7c3aed', '#0f172a', '#ea580c'];
+  useBackHandler(editing ? null : onClose);
+  useEffect(() => listenStatus(me.uid, list => setActiveCount(list.length)), [me.uid]);
+  const limitReached = activeCount >= MAX_ACTIVE_STATUS;
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
@@ -1042,6 +1181,8 @@ function StatusComposer({ me, onClose }) {
     if (preview) URL.revokeObjectURL(preview);
     setFile(null);
     setPreview('');
+    setEdit(null);
+    setVideoDur(0);
   }
 
   function pickFile(e) {
@@ -1050,16 +1191,19 @@ function StatusComposer({ me, onClose }) {
     if (!f) return;
     const isPhoto = tab === 'photo' && f.type.startsWith('image/');
     const isVideo = tab === 'video' && f.type.startsWith('video/');
-    if (!isPhoto && !isVideo) { setError(tab === 'photo' ? 'Please choose an image.' : 'Please choose a video.'); return; }
+    if (!isPhoto && !isVideo) { setError(tab === 'photo' ? t('choosePhotoError') : t('chooseVideoError')); return; }
     if (f.size > 15 * 1024 * 1024) { setError('File is larger than 15 MB.'); return; }
     if (preview) URL.revokeObjectURL(preview);
     setError('');
+    setEdit(null);
     setFile(f);
     setPreview(URL.createObjectURL(f));
   }
 
   async function publish() {
-    setError(''); setBusy(true);
+    setError('');
+    if (limitReached) { setError(t('statusLimit')); return; }
+    setBusy(true); setPct(0);
     try {
       if (tab === 'text') {
         if (!text.trim()) { setError(t('writeSomethingError')); setBusy(false); return; }
@@ -1067,27 +1211,29 @@ function StatusComposer({ me, onClose }) {
       } else {
         if (!file) { setError(tab === 'photo' ? t('choosePhotoError') : t('chooseVideoError')); setBusy(false); return; }
         const statusId = `${Date.now()}`;
-        const url = await uploadStatusMedia(me.uid, statusId, file);
-        await postStatus(me.uid, { type: tab === 'photo' ? 'image' : 'video', content: url });
+        const url = await uploadStatusMedia(me.uid, statusId, file, setPct);
+        const extra = tab === 'video' ? { duration: edit?.duration || videoDur, segments: edit?.segments, overlay: edit?.overlay } : {};
+        await postStatus(me.uid, { type: tab === 'photo' ? 'image' : 'video', content: url, ...extra });
       }
       onClose();
     } catch (e) {
       console.error('Status publish failed:', e);
-      const code = e?.code ? ` (${e.code})` : '';
-      setError((e.message || t('statusPostFailed')) + code);
+      if (e?.code === 'status-limit') setError(t('statusLimit'));
+      else setError((e.message || t('statusPostFailed')) + (e?.code ? ` (${e.code})` : ''));
     } finally {
       setBusy(false);
     }
   }
 
+  const overlay = edit?.overlay;
   return (
-    <div className="status-composer-overlay" onClick={onClose}>
+    <div className="status-composer-overlay" onClick={busy ? undefined : onClose}>
       <div className="status-composer" onClick={e => e.stopPropagation()}>
         <PanelHeader title={t('statusComposerTitle')} onBack={onClose} />
         <div className="composer-tabs">
-          <button className={tab === 'text' ? 'active' : ''} onClick={() => { setTab('text'); clearSelectedFile(); }}><TypeIcon size={16} /> {t('textTab')}</button>
-          <button className={tab === 'photo' ? 'active' : ''} onClick={() => { setTab('photo'); clearSelectedFile(); }}><ImageIcon size={16} /> {t('photoTab')}</button>
-          <button className={tab === 'video' ? 'active' : ''} onClick={() => { setTab('video'); clearSelectedFile(); }}><Video size={16} /> {t('videoTab')}</button>
+          <button className={tab === 'text' ? 'active' : ''} disabled={busy} onClick={() => { setTab('text'); clearSelectedFile(); }}><TypeIcon size={16} /> {t('textTab')}</button>
+          <button className={tab === 'photo' ? 'active' : ''} disabled={busy} onClick={() => { setTab('photo'); clearSelectedFile(); }}><ImageIcon size={16} /> {t('photoTab')}</button>
+          <button className={tab === 'video' ? 'active' : ''} disabled={busy} onClick={() => { setTab('video'); clearSelectedFile(); }}><Video size={16} /> {t('videoTab')}</button>
         </div>
 
         {tab === 'text' && (
@@ -1103,19 +1249,41 @@ function StatusComposer({ me, onClose }) {
 
         {tab !== 'text' && (
           <div className="status-media-pick-wrap">
-            <button type="button" className="media-pick-box" onClick={() => fileRef.current?.click()}>
+            <button type="button" className="media-pick-box" onClick={() => { if (!busy) fileRef.current?.click(); }}>
               {preview
-                ? (tab === 'photo' ? <img src={preview} alt="" /> : <video src={preview} muted playsInline />)
+                ? (tab === 'photo'
+                  ? <img src={preview} alt="" />
+                  : <video src={`${preview}#t=0.001`} muted playsInline preload="auto" onLoadedMetadata={e => setVideoDur(e.currentTarget.duration || 0)} />)
                 : <span>{tab === 'photo' ? t('choosePhoto') : t('chooseVideo')}</span>}
             </button>
-            {preview && <button type="button" className="icon status-media-clear" onClick={clearSelectedFile} title="Remove"><X size={18}/></button>}
+            {preview && tab === 'video' && overlay?.text && (
+              <div className="status-overlay-text small-preview" style={{ left: `${overlay.x}%`, top: `${overlay.y}%`, color: overlay.color, fontSize: `${(overlay.size || 6) * 0.55}vw` }}>{overlay.text}</div>
+            )}
+            {preview && !busy && <button type="button" className="icon status-media-clear" onClick={clearSelectedFile} title="Remove"><X size={18} /></button>}
+            {preview && tab === 'video' && !busy && (
+              <button type="button" className="status-media-edit" onClick={() => setEditing(true)}><Pencil size={15} /> {t('editBtn')}</button>
+            )}
+            {preview && tab === 'video' && edit && (edit.segments.length > 0 || overlay) && (
+              <span className="status-media-badge">✂ {Math.round(edit.duration)}s</span>
+            )}
+            {busy && (
+              <div className="media-upload-overlay">
+                <div className="media-spinner big" />
+                <b>{Math.round(pct * 100)}%</b>
+                <small>{t('uploading')}</small>
+              </div>
+            )}
           </div>
         )}
         <input ref={fileRef} type="file" hidden accept={tab === 'photo' ? 'image/*' : 'video/*'} onChange={pickFile} />
 
+        {limitReached && <div className="error">{t('statusLimit')}</div>}
         {error && <div className="error">{error}</div>}
-        <button className="primary status-publish" onClick={publish} disabled={busy}>{busy ? t('publishing') : t('publish')}</button>
+        <button className="primary status-publish" onClick={publish} disabled={busy || limitReached}>{busy ? t('publishing') : t('publish')}</button>
       </div>
+      {editing && preview && (
+        <VideoEditor src={preview} initial={edit} onCancel={() => setEditing(false)} onDone={r => { setEdit(r); setEditing(false); }} />
+      )}
     </div>
   );
 }
@@ -1136,13 +1304,31 @@ function ProfileEditPanel({ me, profile, onClose }) {
   const [phone, setPhone] = useState(profile.phone || '');
   const [avatar, setAvatar] = useState(profile.avatar || AVATARS[0]);
   const [photoUrl, setPhotoUrl] = useState(profile.photoUrl || '');
+  const [userCode, setUserCode] = useState(profile.userCode || '');
+  const [idError, setIdError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const idMessage = problem => t(problem === 'mix' ? 'userIdInvalidMix' : problem === 'length' ? 'userIdInvalidLength' : 'userIdInvalidChars');
+
   async function save() {
+    setIdError('');
+    const codeChanged = Boolean(profile.userCode) && userCode.trim().toUpperCase() !== String(profile.userCode).toUpperCase();
+    if (codeChanged) {
+      // The ID is only saved when it mixes letters AND digits.
+      const problem = validateUserId(userCode);
+      if (problem) { setIdError(idMessage(problem)); return; }
+    }
     setSaving(true);
     try {
+      if (codeChanged) await changeUserCode(me.uid, profile.userCode, userCode);
       await updateOwnProfile(me.uid, { name, phone, avatar, photoUrl });
       onClose();
+    } catch (e) {
+      if (e?.code === 'user-id-taken') setIdError(t('userIdTaken'));
+      else if (e?.code === 'user-id-mix') setIdError(idMessage('mix'));
+      else if (e?.code === 'user-id-length') setIdError(idMessage('length'));
+      else if (e?.code === 'user-id-chars') setIdError(idMessage('chars'));
+      else setIdError(e?.message || t('statusPostFailed'));
     } finally {
       setSaving(false);
     }
@@ -1159,11 +1345,14 @@ function ProfileEditPanel({ me, profile, onClose }) {
       {profile.userCode && (
         <label>{t('yourId')}
           <div className="id-row">
-            <input value={profile.userCode} readOnly />
-            <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(profile.userCode)}>{t('copy')}</button>
+            <input value={userCode} maxLength={20} autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+              onChange={e => { setUserCode(e.target.value.replace(/[^A-Za-z0-9_]/g, '').slice(0, 20)); setIdError(''); }} />
+            <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(userCode)}>{t('copy')}</button>
           </div>
         </label>
       )}
+      {idError && <div className="error">{idError}</div>}
+      {profile.userCode && <p className="muted small">{t('userIdHint')}</p>}
       {profile.userCode && <p className="muted small">{t('shareIdHint')}</p>}
       <div className="step-actions">
         <button className="secondary" onClick={onClose}>{t('back')}</button>
@@ -1173,7 +1362,7 @@ function ProfileEditPanel({ me, profile, onClose }) {
   );
 }
 
-function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, hasMyStatus }) {
+function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, onAddStatus, hasMyStatus }) {
   const { t, lang, setLang, theme, setTheme, background, setBackground } = usePrefs();
   const [panel, setPanel] = useState('main');
   const [loggingOut, setLoggingOut] = useState(false);
@@ -1190,11 +1379,18 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <PanelHeader title={t('editProfile')} onBack={() => setPanel('main')} />
     <ProfileEditPanel me={me} profile={profile} onClose={() => setPanel('main')} />
   </>;
+  else if (panel === 'myStatus') panelContent = <>
+    <PanelHeader title={t('myStatus')} onBack={() => setPanel('main')} />
+    <MyStatusPanel me={me} onView={onOpenMyStatus} onAdd={onAddStatus} />
+  </>;
   else if (panel === 'language') panelContent = <>
     <PanelHeader title={t('language')} onBack={() => setPanel('main')} />
-    <div className="lang-options">
-      <button className={lang === 'hi' ? 'active' : ''} onClick={() => { setLang('hi'); setPanel('main'); }}>{t('langHindi')}</button>
-      <button className={lang === 'en' ? 'active' : ''} onClick={() => { setLang('en'); setPanel('main'); }}>{t('langEnglish')}</button>
+    <div className="lang-list">
+      {LANGUAGES.map(l => (
+        <button key={l.code} className={lang === l.code ? 'active' : ''} onClick={() => { setLang(l.code); setPanel('main'); }}>
+          <span>{l.label}</span>{lang === l.code && <Check size={19} />}
+        </button>
+      ))}
     </div>
   </>;
   else if (panel === 'theme') panelContent = <>
@@ -1211,7 +1407,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   </>;
   else if (panel === 'applock') panelContent = <>
     <PanelHeader title={t('appLock')} onBack={() => setPanel('main')} />
-    <PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} />
+    <div className="pin-page"><PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} /></div>
     {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>{t('removeAppLock')}</button>}
   </>;
   else if (panel === 'update') panelContent = <>
@@ -1236,9 +1432,9 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <PanelHeader title={t('settings')} onBack={onClose} />
     <div className="settings-main-content">
       <button className="setting-row" onClick={() => setPanel('editProfile')}><User /> {t('profile')} <span className="row-end">›</span></button>
-      <button className="setting-row" onClick={onOpenMyStatus}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('myStatus')}><ImageIcon /> {t('status')} <span className="row-end status-text">{hasMyStatus ? t('statusSet') : t('statusAdd')}</span></button>
       {adminUser && <button className="setting-row" onClick={() => { onOpenChat(adminUser); onClose(); }}><ShieldCheck /> {t('directChatAdmin')} <span className="row-end">›</span></button>}
-      <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{lang === 'hi' ? t('langHindi') : t('langEnglish')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('language')}><MessagesSquare /> {t('language')} <span className="row-end status-text">{LANGUAGES.find(l => l.code === lang)?.label}</span></button>
       <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
       <button className="setting-row" onClick={() => setPanel('background')}><LayoutGrid /> {t('background')} <span className="row-end status-text">{background==='none'?t('backgroundNone'):t('backgroundPattern')}</span></button>
       <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
