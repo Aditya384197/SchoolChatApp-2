@@ -1,6 +1,7 @@
 import {
   increment,
   onValue,
+  get,
   push,
   ref,
   serverTimestamp,
@@ -33,10 +34,16 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
   const fileUrl = options.fileUrl || imageUrl || '';
   const attachmentType = type === 'image' || type === 'video' || type === 'file' ? type : (fileUrl ? 'image' : 'text');
   if (!clean && !fileUrl) return null;
-  await set(ref(db, `chats/${chatId}/participants`), {
-    [senderId]: true,
-    [receiverId]: true
-  });
+  const participantsRef = ref(db, `chats/${chatId}/participants`);
+  const participantsSnap = await get(participantsRef);
+  if (!participantsSnap.exists()) {
+    await set(participantsRef, {
+      [senderId]: true,
+      [receiverId]: true
+    });
+  } else if (!participantsSnap.child(senderId).exists() || !participantsSnap.child(receiverId).exists()) {
+    throw new Error('Chat participants are invalid.');
+  }
 
   const messageId = options.messageId || createMessageId(chatId);
   const createdAt = serverTimestamp();

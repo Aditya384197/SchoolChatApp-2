@@ -69,7 +69,7 @@ public class CatboxUploaderPlugin extends Plugin {
                 // Stream straight onto the socket instead of letting
                 // HttpURLConnection buffer the whole 15 MB body in memory first.
                 connection.setFixedLengthStreamingMode(totalLength);
-                connection.setRequestProperty("User-Agent", "SchoolChat/1.5.0");
+                connection.setRequestProperty("User-Agent", "SchoolChat/1.6.3");
                 connection.setRequestProperty("Connection", "keep-alive");
                 connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
 

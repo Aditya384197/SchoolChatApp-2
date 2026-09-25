@@ -27,7 +27,7 @@ import { postStatus, cleanupExpiredStatus, listenActiveStatusOwners, listenStatu
 import { MediaViewer, ChatImage, VideoThumb } from './components/MediaViewer';
 import { VideoEditor } from './components/VideoEditor';
 import { MyStatusPanel } from './components/MyStatusPanel';
-import { uploadStatusMedia, uploadChatMedia, getAttachmentKind, deleteChatImage, prefetchMedia } from './lib/media';
+import { uploadStatusMedia, uploadChatMedia, getAttachmentKind, deleteChatImage, prefetchMedia, deleteCachedMedia } from './lib/media';
 import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
@@ -404,6 +404,11 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
   }
   async function doClear() {
     await Promise.all(messages.filter(m => m.imageUrl).map(m => deleteChatImage(m.senderId, chatId, m.id).catch(() => {})));
+    await Promise.all(messages.map(async m => {
+      if (m.secureAttachment) return;
+      const kind = m.type || (m.imageUrl ? 'image' : '');
+      if (kind === 'image' || kind === 'video') await deleteCachedMedia(m.fileUrl || m.imageUrl, kind);
+    }));
     await clearChat(chatId);
     setConfirmClear(false);
     onClose();
@@ -501,9 +506,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   // WhatsApp), so opening them later is instant.
   useEffect(() => {
     messages.forEach(m => {
-      if (m.receiverId !== me.uid) return;
+      if (m.receiverId !== me.uid || m.secureAttachment) return;
       const kind = m.type || (m.imageUrl ? 'image' : '');
-      if (m.secureAttachment) return;
       if (kind === 'image' || kind === 'video') prefetchMedia(m.fileUrl || m.imageUrl, kind);
     });
   }, [messages, me.uid]);
@@ -593,6 +597,9 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
           messageId,
           secureAttachment
         });
+        // Keep the sender's own copy locally too, so reopening the chat does
+        // not trigger a fresh remote download for the same attachment.
+        if (!locked && (kind === 'image' || kind === 'video')) prefetchMedia(uploaded.url, kind);
       } catch (error) {
         setImageError(error?.message || 'File could not be sent. Please try again.');
         setText(value);
@@ -650,13 +657,24 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     clearSelection();
   }
   async function deleteForMeBulk() {
-    await Promise.all([...selectedIds].map(id => deleteMessageForMe(me.uid, chatId, id)));
+    await Promise.all([...selectedIds].map(async id => {
+      const msg = visibleMessages.find(m => m.id === id);
+      if (msg && !msg.secureAttachment) {
+        const kind = msg.type || (msg.imageUrl ? 'image' : '');
+        if (kind === 'image' || kind === 'video') await deleteCachedMedia(msg.fileUrl || msg.imageUrl, kind);
+      }
+      return deleteMessageForMe(me.uid, chatId, id);
+    }));
     setShowDeleteSheet(false); clearSelection();
   }
   async function deleteForEveryoneBulk() {
     const selected = visibleMessages.filter(m => selectedIds.has(m.id));
     await Promise.all(selected.map(async m => {
       if (m.imageUrl) await deleteChatImage(m.senderId, chatId, m.id).catch(() => {});
+      if (!m.secureAttachment) {
+        const kind = m.type || (m.imageUrl ? 'image' : '');
+        if (kind === 'image' || kind === 'video') await deleteCachedMedia(m.fileUrl || m.imageUrl, kind);
+      }
       await deleteMessageForEveryone(chatId, m.id);
     }));
     setShowDeleteSheet(false); clearSelection();
@@ -1019,7 +1037,7 @@ function AppShell({ me, profile }) {
     setUsers(prev => prev.filter(u => visibleUids.includes(u.uid) && typeof u.name === 'string' && u.name.trim()));
     const stops = visibleUids.map(uid => onValue(ref(db, `users/${uid}`), s => {
       const val = s.val();
-      const valid = val && typeof val === 'object' && typeof val.name === 'string' && val.name.trim();
+      const valid = val && typeof val === 'object' && typeof val.name === 'string' && val.name.trim() && !['?', 'unknown', 'unknown contact', 'user'].includes(val.name.trim().toLowerCase());
       setUsers(prev => {
         const rest = prev.filter(u => u.uid !== uid);
         return valid ? [...rest, { uid, ...val }] : rest;
@@ -1036,7 +1054,7 @@ function AppShell({ me, profile }) {
     if (profile.role !== 'admin') return undefined;
     return onValue(ref(db, 'users'), s => {
       const all = s.val() || {};
-      setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid && u && typeof u.name === 'string' && u.name.trim()));
+      setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid && u && typeof u.name === 'string' && u.name.trim() && !['?', 'unknown', 'unknown contact', 'user'].includes(u.name.trim().toLowerCase())));
     });
   }, [me.uid, profile.role]);
 
@@ -1137,9 +1155,9 @@ function AppShell({ me, profile }) {
         const data = snap.val() || {};
         const list = Object.entries(data).map(([id, m]) => ({ id, ...m })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
         const latest = list[list.length - 1];
-        if (latest && latest.receiverId === me.uid && !latest.seen) {
+        if (latest && latest.receiverId === me.uid && !latest.secureAttachment) {
           const kind = latest.type || (latest.imageUrl ? 'image' : '');
-          if (kind === 'image' || kind === 'video') prefetchMedia(latest.fileUrl || latest.imageUrl, kind); // auto-download
+          if (kind === 'image' || kind === 'video') prefetchMedia(latest.fileUrl || latest.imageUrl, kind); // auto-cache
         }
         if (latest) {
           setPreviews(prev => ({ ...prev, [chatId]: { text: latest.text, mine: latest.senderId === me.uid, at: latest.createdAt || 0 } }));
@@ -1154,7 +1172,11 @@ function AppShell({ me, profile }) {
   }, [users, me.uid, notificationsReady, chatUser?.uid]);
 
   const filtered = useMemo(() => users
-    .filter(u => u && u.uid && typeof u.name === 'string' && u.name.trim())
+    .filter(u => {
+      if (!u || !u.uid || u.uid === me.uid || typeof u.name !== 'string' || !u.name.trim()) return false;
+      const name = u.name.trim().toLowerCase();
+      return name !== '?' && name !== 'unknown' && name !== 'unknown contact' && name !== 'user';
+    })
     .filter(u =>
       (u.name || '').toLowerCase().includes(query.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(query.toLowerCase()) ||

@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { translations } from '../i18n';
+import { registerPlugin } from '@capacitor/core';
+
+const SystemBars = registerPlugin('SystemBars');
 
 const PrefsContext = createContext(null);
 
@@ -32,7 +35,11 @@ function applyTheme(theme) {
   const meta = document.querySelector('meta[name="color-scheme"]');
   if (meta) meta.setAttribute('content', effective === 'dark' ? 'dark' : 'only light');
   document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute('content', effective === 'dark' ? '#0f172a' : '#0f6fe8'));
+  // Native Android keeps the app edge-to-edge; only the icon contrast changes
+  // with the app theme. On web/PWA this simply rejects and is ignored.
+  SystemBars.setAppearance({ dark: effective === 'dark' }).catch(() => {});
 }
+
 
 export function PrefsProvider({ children }) {
   const [lang, setLangState] = useState(() => {

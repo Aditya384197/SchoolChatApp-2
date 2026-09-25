@@ -8,6 +8,15 @@ const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const CALL_RING_TIMEOUT_MS = 30 * 1000;
 const DISCONNECT_GRACE_MS = 8 * 1000;
 
+async function updateCallFields(callId, patch) {
+  if (!callId || !patch || typeof patch !== 'object') return;
+  const writes = {};
+  Object.entries(patch).forEach(([key, value]) => {
+    writes[`calls/${callId}/${key}`] = value;
+  });
+  await update(ref(db), writes);
+}
+
 function errorMessage(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
     return 'माइक्रोफ़ोन की अनुमति नहीं मिली। Android में School Chat के लिए Microphone permission चालू करें।';
@@ -110,7 +119,7 @@ export function useVoiceCall({ uid, users }) {
     if (finishingRef.current && currentCallIdRef.current === callId) return;
     finishingRef.current = true;
     if (callId) {
-      await update(ref(db, `calls/${callId}`), {
+      await updateCallFields(callId, {
         status: 'ended',
         endedAt: Date.now(),
         endedBy: uid,
@@ -229,7 +238,7 @@ export function useVoiceCall({ uid, users }) {
       await pc.setLocalDescription(offer);
       setActiveCall({ chatId: callId, peer, direction: 'outgoing', status: 'ringing', startedAt: null });
       await onDisconnect(ref(db, `calls/${callId}/status`)).set('ended').catch(() => {});
-      await update(ref(db, `calls/${callId}`), {
+      await updateCallFields(callId, {
         offer: { type: offer.type, sdp: offer.sdp },
       });
       ringTimerRef.current = setTimeout(() => {
@@ -265,14 +274,14 @@ export function useVoiceCall({ uid, users }) {
       await pc.setLocalDescription(answer);
       setActiveCall({ chatId: call.chatId, peer, direction: 'incoming', status: 'connecting', startedAt: null });
       await onDisconnect(ref(db, `calls/${call.chatId}/status`)).set('ended').catch(() => {});
-      await update(ref(db, `calls/${call.chatId}`), {
+      await updateCallFields(call.chatId, {
         status: 'accepted',
         acceptedAt: Date.now(),
         answer: { type: answer.type, sdp: answer.sdp },
       });
     } catch (error) {
       setCallError(errorMessage(error));
-      await update(ref(db, `calls/${call.chatId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+      await updateCallFields(call.chatId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
       cleanupPeer();
       setActiveCall(null);
     }
@@ -280,7 +289,7 @@ export function useVoiceCall({ uid, users }) {
 
   async function declineCall(call = incomingRef.current) {
     if (!call?.chatId) return;
-    await update(ref(db, `calls/${call.chatId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+    await updateCallFields(call.chatId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
     setIncomingCall(null);
     setTimeout(() => remove(ref(db, `calls/${call.chatId}`)).catch(() => {}), 800);
   }
@@ -314,7 +323,7 @@ export function useVoiceCall({ uid, users }) {
           if (data.receiverId === uid && data.status === 'ringing' && data.callerId !== uid && data.offer) {
             const age = Date.now() - Number(data.createdAt || 0);
             if (age > CALL_RING_TIMEOUT_MS) {
-              update(ref(db, `calls/${callId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+              updateCallFields(callId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
               return;
             }
             if (!activeRef.current && !incomingRef.current) {
@@ -340,7 +349,7 @@ export function useVoiceCall({ uid, users }) {
 
   React.useEffect(() => () => {
     const callId = currentCallIdRef.current;
-    if (callId) update(ref(db, `calls/${callId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+    if (callId) updateCallFields(callId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
     cleanupPeer();
   }, [uid]);
 

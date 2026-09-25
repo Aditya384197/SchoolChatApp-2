@@ -163,6 +163,7 @@ export async function getPersonalSecureKey(uid, pin) {
 
 export async function prepareLockedAttachment(file, receiverUid, caption = '') {
   if (!file) throw new Error('Please choose a file.');
+  if (file.size > 15 * 1024 * 1024) throw new Error('File is larger than 15 MB.');
   const publicSnap = await get(ref(db, `users/${receiverUid}/encryptionPublicKey`));
   const receiverPublic = publicSnap.val();
   if (!receiverPublic) {
