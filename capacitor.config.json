@@ -2,7 +2,9 @@
   "appId": "com.aditya.schoolchat",
   "appName": "School Chat",
   "webDir": "dist",
-  "server": { "androidScheme": "https" },
+  "server": {
+    "androidScheme": "https"
+  },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 250,
@@ -10,8 +12,8 @@
       "backgroundColor": "#0f6fe8",
       "androidScaleType": "CENTER_INSIDE",
       "showSpinner": false,
-      "splashFullScreen": false,
-      "splashImmersive": false
+      "splashFullScreen": true,
+      "splashImmersive": true
     }
   }
 }

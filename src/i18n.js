@@ -68,6 +68,15 @@ export const translations = {
     editBtn: "एडिट", uploading: "अपलोड हो रहा है…", userIdInvalidMix: "आईडी सेव नहीं हो पाएगी — इसमें अक्षर और अंक दोनों होने चाहिए।",
     userIdInvalidLength: "आईडी 4 से 20 अक्षरों की होनी चाहिए।", userIdInvalidChars: "आईडी में सिर्फ़ अक्षर, अंक और _ चलेंगे।", userIdTaken: "यह आईडी पहले से किसी ने ले रखी है, दूसरी चुनें।",
     userIdHint: "आप अपनी आईडी बदल सकते हैं। उसमें अक्षर और अंक दोनों ज़रूरी हैं (4–20 वर्ण)। दोस्त इसी आईडी से आपको ढूंढते हैं।", myStatus: "मेरा स्टेटस", langTelugu: "తెలుగు",
+
+    // Privacy / locked attachments
+    privacy: 'गोपनीयता', privacySetupDescription: 'लॉक की गई फ़ाइलें खोलने के लिए अलग गोपनीयता पिन बनाएं। इसके बाद आपकी निजी सुरक्षित कुंजी इसी डिवाइस पर सुरक्षित रहेगी।',
+    privacyKeyRequiresLock: 'सुरक्षित कुंजी देखने के लिए पहले अपनी गोपनीयता पिन दर्ज करें।', privacyLock: 'गोपनीयता लॉक', privacyLockSetup: 'गोपनीयता लॉक बनाएं', privacyLockSetupHint: 'यह अलग 4 अंकों का पिन लॉक की गई फ़ाइलों की निजी कुंजी की सुरक्षा करेगा।',
+    privacyLockEnter: 'अपनी गोपनीयता पिन दर्ज करें।', privacyUnlockThenKey: 'पिन सही होने पर आपकी निजी सुरक्षित कुंजी दिखाई जाएगी।', yourSecureKey: 'आपकी सुरक्षित कुंजी', secureKeyDeviceOnly: 'यह कुंजी केवल इस डिवाइस पर उपलब्ध निजी कुंजी के साथ लॉक की गई फ़ाइलें खोलती है। इसे किसी के साथ साझा न करें।',
+    removePrivacyLock: 'गोपनीयता लॉक हटाएं', secureKeyPrompt: 'फ़ाइल खोलने के लिए अपनी सुरक्षित कुंजी दर्ज करें।', enterSecureKey: 'सुरक्षित कुंजी', openSecureFile: 'फ़ाइल खोलें', openingSecureFile: 'फ़ाइल खोली जा रही है…',
+    secureKeyInvalid: 'सुरक्षित कुंजी गलत है।', recipientKeyMissing: 'प्राप्तकर्ता ने इस नए संस्करण को अभी नहीं खोला है। उसे कम से कम एक बार ऐप खोलना होगा, फिर लॉक की गई फ़ाइल भेजी जा सकेगी।', secureKeyUnavailable: 'सुरक्षित कुंजी इस डिवाइस पर उपलब्ध नहीं है।', secureFileOpenFailed: 'लॉक की गई फ़ाइल नहीं खुल सकी।', secureFileReady: 'लॉक की गई फ़ाइल तैयार है', downloadSecureFile: 'फ़ाइल डाउनलोड करें',
+    lockedAttachment: '🔐 लॉक की गई फ़ाइल', lockedAttachmentInfo: 'यह फ़ाइल प्राप्तकर्ता की सुरक्षित कुंजी से एन्क्रिप्ट की गई है।', lockAttachment: 'फ़ाइल लॉक करें', unlockAttachment: 'लॉक हटाएं', locked: 'लॉक', lock: 'लॉक करें',
+    tooManyPinAttempts: 'बहुत अधिक गलत प्रयास', tryAgainIn: 'फिर से प्रयास करें', encryptedForRecipient: 'प्राप्तकर्ता के लिए एन्क्रिप्टेड', tapToUnlock: 'खोलने के लिए टैप करें',
     langMarathi: "मराठी", langPunjabi: "ਪੰਜਾਬੀ",
   },
   en: {
@@ -130,6 +139,15 @@ export const translations = {
     editBtn: "Edit", uploading: "Uploading…", userIdInvalidMix: "ID could not be saved — it must contain both letters and numbers.",
     userIdInvalidLength: "The ID must be 4 to 20 characters long.", userIdInvalidChars: "Only letters, numbers and _ are allowed in the ID.", userIdTaken: "This ID is already taken. Try another one.",
     userIdHint: "You can change your ID. It must contain both letters and numbers (4–20 characters). Friends find you with this ID.", myStatus: "My status", langTelugu: "తెలుగు",
+
+    // Privacy / locked attachments
+    privacy: 'Privacy', privacySetupDescription: 'Create a separate privacy PIN for locked files. Your personal secure key is then protected on this device.',
+    privacyKeyRequiresLock: 'Enter your privacy PIN first to reveal your personal secure key.', privacyLock: 'Privacy Lock', privacyLockSetup: 'Set Privacy Lock', privacyLockSetupHint: 'This separate 4-digit PIN protects the private key used to open locked files.',
+    privacyLockEnter: 'Enter your privacy PIN.', privacyUnlockThenKey: 'After the PIN is verified, your personal secure key will be shown.', yourSecureKey: 'Your Secure Key', secureKeyDeviceOnly: 'This key works together with the private key stored on this device to open locked files. Never share it with anyone.',
+    removePrivacyLock: 'Remove Privacy Lock', secureKeyPrompt: 'Enter your secure key to open this file.', enterSecureKey: 'Secure key', openSecureFile: 'Open file', openingSecureFile: 'Opening file…',
+    secureKeyInvalid: 'The secure key is incorrect.', recipientKeyMissing: 'The recipient must open this latest version once before a locked file can be sent to them.', secureKeyUnavailable: 'The secure key is unavailable on this device.', secureFileOpenFailed: 'The locked file could not be opened.', secureFileReady: 'Locked file ready', downloadSecureFile: 'Download file',
+    lockedAttachment: '🔐 Locked attachment', lockedAttachmentInfo: 'This file is encrypted for the intended recipient.', lockAttachment: 'Lock file', unlockAttachment: 'Remove lock', locked: 'Locked', lock: 'Lock',
+    tooManyPinAttempts: 'Too many incorrect attempts', tryAgainIn: 'Try again in', encryptedForRecipient: 'Encrypted for recipient', tapToUnlock: 'Tap to unlock',
     langMarathi: "मराठी", langPunjabi: "ਪੰਜਾਬੀ",
   },
   te: {

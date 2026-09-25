@@ -590,3 +590,89 @@ button:active:not(:disabled):not(.icon),.user-row:active,.setting-row:active,.mo
 :root[data-theme="dark"] .mini-call-pill { background: #052e1b; border-color: #166534; color: #bbf7d0; }
 :root[data-theme="dark"] .selection-bar { background: #111a2e; color: #e2e8f0; }
 :root[data-theme="dark"] .scroll-bottom { background: #1e293b; color: #e2e8f0; }
+
+
+/* ===== 1.6.1: true edge-to-edge app surface + fast settings ===== */
+html, body, #root { width:100%; height:100%; min-height:100%; margin:0; overflow:hidden; }
+body { background:#fff; }
+.auth, .screen, .splash { min-height:100dvh; height:100dvh; }
+.auth { padding:calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left)); }
+.screen { max-width:820px; width:100%; }
+.topbar { height:calc(68px + env(safe-area-inset-top)); min-height:calc(68px + env(safe-area-inset-top)); padding:calc(10px + env(safe-area-inset-top)) calc(15px + env(safe-area-inset-right)) 10px calc(15px + env(safe-area-inset-left)); }
+.tab-bar { padding-bottom:env(safe-area-inset-bottom); }
+.composer { padding-bottom:calc(9px + env(safe-area-inset-bottom)); }
+.drawer { height:100dvh; padding-top:calc(18px + env(safe-area-inset-top)); padding-bottom:calc(18px + env(safe-area-inset-bottom)); }
+.overlay.settings-overlay { animation:settingsOverlayFast .05s ease-out both; }
+.settings-drawer { animation:settingsRevealFast .10s cubic-bezier(.2,.85,.25,1) both !important; transform-origin:top right; will-change:transform,opacity; clip-path:none !important; }
+@keyframes settingsOverlayFast { from{opacity:0} to{opacity:1} }
+@keyframes settingsRevealFast { from{opacity:0;transform:translate3d(8px,-5px,0) scale(.985)} to{opacity:1;transform:translate3d(0,0,0) scale(1)} }
+.settings-panel-view { animation:settingsPanelFast .07s ease-out both !important; will-change:transform,opacity; }
+@keyframes settingsPanelFast { from{opacity:0;transform:translate3d(8px,0,0)} to{opacity:1;transform:translate3d(0,0,0)} }
+
+/* App lock: compact, balanced circular keypad instead of oversized cards. */
+.lock-screen { min-height:100dvh; height:100dvh; padding:calc(20px + env(safe-area-inset-top)) 18px calc(20px + env(safe-area-inset-bottom)); overflow:auto; background:linear-gradient(160deg,#f8fbff,#eef5ff); color:#0f172a; }
+.lock-screen img { width:82px; height:82px; border-radius:22px; }
+.lock-screen .pin-pad { width:min(340px,100%); gap:13px; padding:10px 8px; }
+.lock-screen .pin-grid { width:auto; grid-template-columns:repeat(3,72px); gap:12px 18px; justify-content:center; }
+.lock-screen .pin-grid button { width:72px; height:72px; max-height:none; aspect-ratio:auto; border-radius:50%; background:#fff; color:#0f172a; border:1px solid #dbe4ef; box-shadow:0 5px 16px rgba(15,23,42,.10); font-size:23px; font-weight:650; }
+.lock-screen .pin-grid button:active { transform:scale(.94); background:#f8fafc; }
+.lock-screen .pin-dots span { width:11px; height:11px; }
+.pin-lockout { min-height:44px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; color:#b91c1c; text-align:center; }
+.pin-lockout strong { font-variant-numeric:tabular-nums; }
+.pin-attempts { color:#64748b; font-variant-numeric:tabular-nums; }
+.pin-error { margin-top:2px; text-align:center; }
+.pin-page { min-height:calc(100dvh - 68px); padding:0 12px calc(env(safe-area-inset-bottom) + 8px); }
+.pin-page .pin-pad { width:min(340px,100%); max-width:340px; flex:none; justify-content:flex-start; gap:13px; padding:12px 0; }
+.pin-page .pin-pad > b { margin-top:18px; font-size:18px; text-align:center; }
+.pin-page .pin-grid { width:auto; grid-template-columns:repeat(3,68px); gap:12px 16px; margin-top:7px; justify-content:center; }
+.pin-page .pin-grid button { width:68px; height:68px; border-radius:50%; font-size:22px; }
+
+/* Locked attachment + privacy UI. */
+.locked-attachment { width:100%; display:flex; align-items:center; gap:10px; text-align:left; padding:11px 12px; margin:0 0 5px; border:1px solid #c7d2fe; border-radius:14px; background:#eef2ff; color:#1e3a8a; }
+.locked-attachment-icon { width:38px; height:38px; display:grid; place-items:center; border-radius:12px; background:#dbeafe; flex:none; }
+.locked-attachment span:last-child { display:grid; gap:2px; min-width:0; }
+.locked-attachment b { font-size:13px; }
+.locked-attachment small { color:#64748b; font-size:11px; }
+.attachment-lock { flex:none; display:grid; justify-items:center; gap:2px; width:44px; min-height:42px; padding:4px; border:1px solid #dbe4ef; border-radius:12px; background:#f8fafc; color:#64748b; }
+.attachment-lock small { font-size:9px; font-weight:800; }
+.attachment-lock.active { background:#eef2ff; color:#1d4ed8; border-color:#93c5fd; }
+.secure-gate-overlay, .secure-file-overlay { position:fixed; inset:0; z-index:400; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(2,8,23,.58); backdrop-filter:blur(4px); }
+.secure-gate-card, .secure-file-card { width:min(430px,100%); max-height:calc(100dvh - 40px); overflow:auto; border-radius:24px; background:#fff; color:#0f172a; box-shadow:0 24px 70px rgba(0,0,0,.28); padding:16px; }
+.secure-gate-head, .secure-file-head { display:flex; align-items:center; gap:10px; min-height:42px; }
+.secure-gate-head > b, .secure-file-head > div { flex:1; min-width:0; }
+.secure-gate-card > p { color:#64748b; font-size:13px; line-height:1.5; }
+.secure-gate-card label { margin-top:12px; }
+.secure-key-reveal { display:flex; align-items:center; gap:8px; margin:12px 0; }
+.secure-key-reveal span { flex:1; padding:11px 12px; border-radius:12px; background:#f1f5f9; font:800 12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; overflow:auto; white-space:nowrap; }
+.secure-file-body { min-height:240px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; }
+.secure-file-body small { color:#64748b; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.secure-file-frame { display:block; width:100%; height:min(64dvh,620px); border:0; border-radius:14px; background:#f8fafc; margin-top:10px; }
+.secure-download { width:100%; margin-top:10px; }
+.secure-file-caption { padding:10px 12px; margin:10px 0 0; background:#f8fafc; border-radius:12px; font-size:13px; }
+.secure-info-card { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:5px 10px; padding:14px; border:1px solid #c7d2fe; border-radius:14px; background:#eef2ff; color:#1e3a8a; }
+.secure-info-card small { grid-column:2; color:#64748b; font-size:11px; }
+.privacy-panel { min-height:100%; }
+.secure-key-panel { display:flex; flex-direction:column; align-items:center; gap:10px; padding:24px 8px 10px; text-align:center; }
+.secure-key-display { width:100%; padding:15px; border-radius:14px; background:#f1f5f9; font:900 15px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.7px; word-break:break-all; }
+.danger-link { color:#b91c1c; }
+
+/* Dark-theme counterparts. */
+:root[data-theme="dark"] body { background:#0b1220; }
+:root[data-theme="dark"] .lock-screen { background:linear-gradient(160deg,#0b1220,#111a2e); color:#f1f5f9; }
+:root[data-theme="dark"] .lock-screen .pin-grid button, :root[data-theme="dark"] .pin-page .pin-grid button { background:#1e293b; color:#f1f5f9; border-color:#334155; box-shadow:none; }
+:root[data-theme="dark"] .locked-attachment { background:#172554; border-color:#1d4ed8; color:#dbeafe; }
+:root[data-theme="dark"] .locked-attachment-icon { background:#1e3a8a; }
+:root[data-theme="dark"] .locked-attachment small { color:#94a3b8; }
+:root[data-theme="dark"] .attachment-lock { background:#0f172a; border-color:#334155; color:#94a3b8; }
+:root[data-theme="dark"] .attachment-lock.active { background:#172554; color:#93c5fd; border-color:#3b82f6; }
+:root[data-theme="dark"] .secure-gate-card, :root[data-theme="dark"] .secure-file-card { background:#111a2e; color:#e2e8f0; }
+:root[data-theme="dark"] .secure-key-reveal span, :root[data-theme="dark"] .secure-key-display, :root[data-theme="dark"] .secure-file-caption { background:#0f172a; color:#e2e8f0; }
+:root[data-theme="dark"] .secure-info-card { background:#172554; border-color:#1d4ed8; color:#dbeafe; }
+:root[data-theme="dark"] .secure-info-card small { color:#94a3b8; }
+
+@media(max-width:380px){
+  .lock-screen .pin-grid{grid-template-columns:repeat(3,64px);gap:10px 13px}
+  .lock-screen .pin-grid button{width:64px;height:64px;font-size:21px}
+  .pin-page .pin-grid{grid-template-columns:repeat(3,62px);gap:10px 13px}
+  .pin-page .pin-grid button{width:62px;height:62px;font-size:21px}
+}

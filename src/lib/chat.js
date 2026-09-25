@@ -50,13 +50,14 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
     ...(options.fileName ? { fileName: options.fileName } : {}),
     ...(options.fileType ? { fileType: options.fileType } : {}),
     ...(options.fileSize ? { fileSize: Number(options.fileSize) } : {}),
+    ...(options.secureAttachment ? { secureAttachment: options.secureAttachment } : {}),
     createdAt,
     delivered: false,
     deliveredAt: null,
     seen: false,
     seenAt: null
   };
-  const preview = clean || (attachmentType === 'image' ? '📷 Image' : attachmentType === 'video' ? '🎥 Video' : attachmentType === 'file' ? `📎 ${options.fileName || 'File'}` : '');
+  const preview = options.secureAttachment ? '🔐 Locked attachment' : (clean || (attachmentType === 'image' ? '📷 Image' : attachmentType === 'video' ? '🎥 Video' : attachmentType === 'file' ? `📎 ${options.fileName || 'File'}` : ''));
 
   const writes = {
     [`chats/${chatId}/messages/${messageId}`]: msg,

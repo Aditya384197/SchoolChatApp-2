@@ -20,7 +20,7 @@ import { removeUser } from './lib/admin';
 import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification, listenNotificationActions } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
-import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
+import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey, isPrivacyPinSet, clearPrivacyPin, PRIVACY_PIN_KEY } from './components/AppLock';
 import { usePrefs, localeFor, LANGUAGES } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus, listenActiveStatusOwners, listenStatus, MAX_ACTIVE_STATUS } from './lib/status';
@@ -33,6 +33,7 @@ import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 import { useVoiceCall } from './lib/calls';
 import { getAudioRoutes, setAudioRoute } from './lib/audioRoute';
+import { ensureIdentityKey, protectIdentityWithPin, disableIdentityProtection, getPersonalSecureKey, decryptLockedAttachment, prepareLockedAttachment } from './lib/secureFiles';
 
 function formatLastSeen(ts, t, lang) {
   const unavailable = `${t('lastSeen')} ${t('notAvailable')}`;
@@ -248,31 +249,131 @@ function CompleteProfileScreen({ me }) {
   );
 }
 
-function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, selected, onToggleSelect, onOpenMedia }) {
+function MessageBubble({ me, message, onSeen, onLongPress, selectionMode, selected, onToggleSelect, onOpenMedia, onOpenLocked }) {
+  const { t } = usePrefs();
   const mine=message.senderId===me.uid, pressTimer=useRef(null);
   function start(){if(!selectionMode) pressTimer.current=setTimeout(()=>onLongPress(message),500)} function stop(){clearTimeout(pressTimer.current)}
   function tap(){if(selectionMode){onToggleSelect(message.id);return} if(!mine) onSeen(message.id)}
   const attachmentType = message.type || (message.imageUrl ? 'image' : 'text');
   const attachmentUrl = message.fileUrl || message.imageUrl || '';
   function openMedia(e, kind) {
-    if (selectionMode) return; // in selection mode a tap just toggles the selection
+    if (selectionMode) return;
     e.stopPropagation();
     if (!mine) onSeen(message.id);
     onOpenMedia?.({ kind, url: attachmentUrl, caption: message.text || '' });
   }
   return <div data-message-date={message.createdAt?new Date(message.createdAt).toDateString():''} className={`bubble ${mine?'mine bubble-enter-mine':'theirs bubble-enter-theirs'} ${selected?'selected':''}`} onClick={tap} onPointerDown={start} onPointerUp={stop} onPointerLeave={stop} onContextMenu={e=>{e.preventDefault();onLongPress(message)}}>
-    {attachmentType==='image' && attachmentUrl && <ChatImage url={attachmentUrl} alt={message.text||'Image'} onOpen={e=>openMedia(e,'image')}/>}
-    {attachmentType==='video' && attachmentUrl && <VideoThumb url={attachmentUrl} onOpen={e=>openMedia(e,'video')}/>}
-    {attachmentType==='file' && attachmentUrl && <a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>📎 <span>{message.fileName||'File'}</span></a>}
-    {message.text&&<div>{message.text}</div>}
+    {message.secureAttachment ? <button type="button" className="locked-attachment" onClick={e=>{e.stopPropagation(); if(!selectionMode){if(!mine) onSeen(message.id); onOpenLocked?.(message);}}}><span className="locked-attachment-icon"><Lock size={19}/></span><span><b>{t('lockedAttachment')}</b><small>{message.senderId===me.uid ? t('encryptedForRecipient') : t('tapToUnlock')}</small></span></button> : <>
+      {attachmentType==='image' && attachmentUrl && <ChatImage url={attachmentUrl} alt={message.text||'Image'} onOpen={e=>openMedia(e,'image')}/>}
+      {attachmentType==='video' && attachmentUrl && <VideoThumb url={attachmentUrl} onOpen={e=>openMedia(e,'video')}/>}
+      {attachmentType==='file' && attachmentUrl && <a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>📎 <span>{message.fileName||'File'}</span></a>}
+      {message.text&&<div>{message.text}</div>}
+    </>}
     <div className="message-meta"><span>{message.createdAt?new Date(message.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'…'}</span>{mine&&<span className={`ticks ${message.seen?'seen':''}`}>{message.delivered?'✓✓':'✓'}</span>}</div>
   </div>
 }
 
+
 function MessageInfo({message,me,onClose}){
   const {t}=usePrefs(); const fmt=ts=>ts?new Date(ts).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):t('notAvailable');
   const attachmentUrl=message.fileUrl||message.imageUrl||''; const type=message.type||(message.imageUrl?'image':'text');
-  return <div className="info-overlay" onClick={onClose}><aside className="message-info" onClick={e=>e.stopPropagation()}><PanelHeader title={t('messageInfo')} onBack={onClose}/><div className="info-message-preview">{type==='image'&&attachmentUrl&&<img src={attachmentUrl} alt=""/>}{type==='video'&&attachmentUrl&&<video src={attachmentUrl} controls playsInline preload="metadata"/>}{type==='file'&&attachmentUrl&&<a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer">📎 <span>{message.fileName||'File'}</span></a>}{message.text&&<p>{message.text}</p>}<small>{fmt(message.createdAt)}</small></div><div className="info-list"><div><b>{message.senderId===me.uid?t('sent'):t('received')}</b><span>{fmt(message.createdAt)}</span></div><div><b>{t('delivered')}</b><span>{fmt(message.deliveredAt)}</span></div><div><b>{t('seen')}</b><span>{fmt(message.seenAt)}</span></div></div></aside></div>
+  return <div className="info-overlay" onClick={onClose}><aside className="message-info" onClick={e=>e.stopPropagation()}><PanelHeader title={t('messageInfo')} onBack={onClose}/><div className="info-message-preview">{message.secureAttachment ? <div className="secure-info-card"><Lock size={22}/><b>{t('lockedAttachment')}</b><small>{t('lockedAttachmentInfo')}</small></div> : <>{type==='image'&&attachmentUrl&&<img src={attachmentUrl} alt=""/>}{type==='video'&&attachmentUrl&&<video src={attachmentUrl} controls playsInline preload="metadata"/>}{type==='file'&&attachmentUrl&&<a className="message-file" href={attachmentUrl} target="_blank" rel="noopener noreferrer">📎 <span>{message.fileName||'File'}</span></a>}{message.text&&<p>{message.text}</p>}</>}<small>{fmt(message.createdAt)}</small></div><div className="info-list"><div><b>{message.senderId===me.uid?t('sent'):t('received')}</b><span>{fmt(message.createdAt)}</span></div><div><b>{t('delivered')}</b><span>{fmt(message.deliveredAt)}</span></div><div><b>{t('seen')}</b><span>{fmt(message.seenAt)}</span></div></div></aside></div>
+}
+
+function SecureFileViewer({file, onClose}) {
+  const { t } = usePrefs();
+  useBackHandler(onClose);
+  const urlRef = useRef(file.url);
+  useEffect(() => () => { try { URL.revokeObjectURL(urlRef.current); } catch {} }, []);
+  const download = () => {
+    const a = document.createElement('a'); a.href = urlRef.current; a.download = file.name || 'secure-file'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  return <div className="secure-file-overlay" onClick={onClose}><div className="secure-file-card" onClick={e=>e.stopPropagation()}>
+    <div className="secure-file-head"><div><Lock size={18}/><b>{file.name}</b></div><button className="icon" onClick={onClose}><X/></button></div>
+    {file.type === 'application/pdf' ? <><iframe title={file.name} src={urlRef.current} className="secure-file-frame" /><button className="primary secure-download" onClick={download}>{t('downloadSecureFile')}</button></> : <div className="secure-file-body"><FileIcon size={46}/><b>{t('secureFileReady')}</b><small>{file.name}</small><button className="primary" onClick={download}>{t('downloadSecureFile')}</button></div>}
+    {file.caption ? <p className="secure-file-caption">{file.caption}</p> : null}
+  </div></div>;
+}
+
+function SecureAttachmentGate({ message, me, onClose, onOpenMedia, onOpenFile }) {
+  const { t } = usePrefs();
+  const [step, setStep] = useState(isPrivacyPinSet() ? 'privacy' : 'setup');
+  const [secureKey, setSecureKey] = useState('');
+  const [enteredKey, setEnteredKey] = useState('');
+  const [pinForSession, setPinForSession] = useState('');
+  const pinRef = useRef('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const setupPromise = useRef(null);
+  const setupPinRef = useRef('');
+  useBackHandler(onClose);
+
+  async function finishPrivacy(pin) {
+    pinRef.current = pin;
+    setPinForSession(pin);
+    setError('');
+    try {
+      const key = await getPersonalSecureKey(me.uid, pin);
+      setSecureKey(key);
+      setStep('key');
+    } catch (e) {
+      setError(e?.message || t('secureKeyUnavailable'));
+    }
+  }
+
+  async function openLocked() {
+    if (!enteredKey.trim() || busy) return;
+    setBusy(true); setError('');
+    try {
+      const file = await decryptLockedAttachment(message, me.uid, pinForSession, enteredKey);
+      const url = URL.createObjectURL(file.blob);
+      if (file.kind === 'image' || file.kind === 'video') {
+        onOpenMedia?.({ kind: file.kind, url, caption: file.caption, revokeUrl: true });
+      } else {
+        onOpenFile?.({ ...file, url });
+      }
+      onClose();
+    } catch (e) {
+      if (e?.code === 'secure-key-invalid') setError(t('secureKeyInvalid'));
+      else if (e?.code === 'recipient-key-missing') setError(t('recipientKeyMissing'));
+      else setError(e?.message || t('secureFileOpenFailed'));
+    } finally { setBusy(false); }
+  }
+
+  const copyKey = () => navigator.clipboard?.writeText(secureKey).catch(() => {});
+
+  return <div className="secure-gate-overlay" onClick={onClose}><div className="secure-gate-card" onClick={e=>e.stopPropagation()}>
+    {step === 'setup' ? <>
+      <div className="secure-gate-head"><ShieldCheck size={22}/><b>{t('privacyLockSetup')}</b><button className="icon" onClick={onClose}><X/></button></div>
+      <p>{t('privacyLockSetupHint')}</p>
+      <PinPad mode="set" storageKey={PRIVACY_PIN_KEY}
+        onSet={pin => { setupPinRef.current = pin; setupPromise.current = protectIdentityWithPin(me.uid, pin); }}
+        onSuccess={async () => {
+          try { await setupPromise.current; } catch (e) { clearPrivacyPin(); setError(e?.message || t('secureKeyUnavailable')); return; }
+          const pin = setupPinRef.current || '';
+          setPinForSession(pin);
+          try { setSecureKey(await getPersonalSecureKey(me.uid, pin)); setStep('key'); }
+          catch (e) { setError(e?.message || t('secureKeyUnavailable')); }
+        }}
+        onCancel={onClose}
+      />
+      {error && <div className="error">{error}</div>}
+    </> : step === 'privacy' ? <>
+      <div className="secure-gate-head"><ShieldCheck size={22}/><b>{t('privacyLock')}</b><button className="icon" onClick={onClose}><X/></button></div>
+      <p>{t('privacyLockEnter')}</p>
+      <PinPad mode="verify" storageKey={PRIVACY_PIN_KEY} onVerified={pin=>{pinRef.current=pin;setPinForSession(pin)}} onSuccess={() => finishPrivacy(pinRef.current)} onCancel={onClose} />
+      <p className="muted small">{t('privacyUnlockThenKey')}</p>
+      {!pinForSession && <div className="secure-continue" style={{display:'none'}}>hidden</div>}
+    </> : <>
+      <div className="secure-gate-head"><Lock size={22}/><b>{t('lockedAttachment')}</b><button className="icon" onClick={onClose}><X/></button></div>
+      <p>{t('secureKeyPrompt')}</p>
+      <div className="secure-key-reveal"><span>{secureKey}</span><button className="secondary" onClick={copyKey}>{t('copy')}</button></div>
+      <label>{t('enterSecureKey')}<input value={enteredKey} onChange={e=>setEnteredKey(e.target.value.toUpperCase())} autoCapitalize="characters" autoCorrect="off" spellCheck={false} /></label>
+      {error && <div className="error">{error}</div>}
+      <button className="primary" onClick={openLocked} disabled={busy || !enteredKey.trim()}>{busy ? t('openingSecureFile') : t('openSecureFile')}</button>
+    </>}
+  </div></div>;
 }
 
 function BulkDeleteSheet({ canDeleteForEveryone, onClose, onDeleteForMe, onDeleteForEveryone }) {
@@ -352,6 +453,9 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState('');
   const [attachmentKind, setAttachmentKind] = useState(null);
+  const [attachmentLocked, setAttachmentLocked] = useState(false);
+  const [secureGateMessage, setSecureGateMessage] = useState(null);
+  const [secureFileViewer, setSecureFileViewer] = useState(null);
   const [typingUsers, setTypingUsers] = useState({});
   const [sending, setSending] = useState(false);
   const [imageError, setImageError] = useState('');
@@ -399,6 +503,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     messages.forEach(m => {
       if (m.receiverId !== me.uid) return;
       const kind = m.type || (m.imageUrl ? 'image' : '');
+      if (m.secureAttachment) return;
       if (kind === 'image' || kind === 'video') prefetchMedia(m.fileUrl || m.imageUrl, kind);
     });
   }, [messages, me.uid]);
@@ -449,6 +554,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     setAttachmentFile(null);
     setAttachmentKind(null);
     setAttachmentPreview('');
+    setAttachmentLocked(false);
     setImageError('');
   }
 
@@ -466,17 +572,26 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     if (attachmentFile) {
       const file = attachmentFile;
       const kind = attachmentKind;
+      const locked = attachmentLocked;
       const messageId = createMessageId(chatId);
       clearChatAttachment();
       try {
-        const uploaded = await uploadChatMedia(me.uid, chatId, messageId, file, setUploadPct);
-        await sendMessage(chatId, me.uid, user.uid, value, {
-          type: kind,
+        let uploadFile = file;
+        let secureAttachment = null;
+        if (locked) {
+          const prepared = await prepareLockedAttachment(file, user.uid, value);
+          uploadFile = prepared.file;
+          secureAttachment = prepared.secure;
+        }
+        const uploaded = await uploadChatMedia(me.uid, chatId, messageId, uploadFile, setUploadPct);
+        await sendMessage(chatId, me.uid, user.uid, locked ? '' : value, {
+          type: locked ? 'file' : kind,
           fileUrl: uploaded.url,
-          fileName: uploaded.file.name,
-          fileType: uploaded.file.type || file.type || 'application/octet-stream',
-          fileSize: uploaded.file.size,
-          messageId
+          fileName: locked ? 'Locked attachment' : uploaded.file.name,
+          fileType: locked ? 'application/octet-stream' : (uploaded.file.type || file.type || 'application/octet-stream'),
+          fileSize: locked ? 0 : uploaded.file.size,
+          messageId,
+          secureAttachment
         });
       } catch (error) {
         setImageError(error?.message || 'File could not be sent. Please try again.');
@@ -485,6 +600,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
         setUploadPct(null);
         setAttachmentFile(file);
         setAttachmentKind(kind);
+        setAttachmentLocked(locked);
         setAttachmentPreview(kind === 'image' || kind === 'video' ? URL.createObjectURL(file) : '');
         return;
       }
@@ -547,6 +663,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   }
 
   const otherTyping = Boolean(typingUsers[user.uid]);
+  useEffect(() => () => { if (viewerMedia?.revokeUrl && viewerMedia.url) { try { URL.revokeObjectURL(viewerMedia.url); } catch {} } }, [viewerMedia]);
 
   if (!chatUnlocked) {
     return (
@@ -597,6 +714,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
             onLongPress={msg => setSelectedIds(new Set([msg.id]))}
             selectionMode={selectionMode} selected={selectedIds.has(m.id)} onToggleSelect={toggleSelect}
             onOpenMedia={setViewerMedia}
+            onOpenLocked={setSecureGateMessage}
           />
         ))}
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
@@ -609,6 +727,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
           {attachmentKind === 'video' && attachmentPreview && <video src={attachmentPreview} muted playsInline />}
           {attachmentKind === 'file' && <div className="attachment-file-preview">📎 <b>{attachmentFile.name}</b><small>{Math.ceil(attachmentFile.size / 1024)} KB</small></div>}
           <input value={text} onChange={e=>setText(e.target.value)} placeholder={t('imageCaption')} />
+          <button type="button" className={`attachment-lock ${attachmentLocked ? 'active' : ''}`} onClick={() => setAttachmentLocked(v => !v)} title={attachmentLocked ? t('unlockAttachment') : t('lockAttachment')}><Lock size={18}/><small>{attachmentLocked ? t('locked') : t('lock')}</small></button>
           <button type="button" className="icon" onClick={clearChatAttachment} title="Remove"><X size={18} /></button>
         </div>
       )}
@@ -622,6 +741,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       {!nearBottom&&<button className="scroll-bottom" onClick={scrollBottom}><ArrowLeft size={17} style={{transform:'rotate(-90deg)'}}/></button>}
       {infoMessage&&<MessageInfo message={infoMessage} me={me} onClose={()=>setInfoMessage(null)}/>}
       {viewerMedia&&<MediaViewer kind={viewerMedia.kind} url={viewerMedia.url} caption={viewerMedia.caption} onClose={()=>setViewerMedia(null)}/>}
+      {secureGateMessage&&<SecureAttachmentGate message={secureGateMessage} me={me} onClose={()=>setSecureGateMessage(null)} onOpenMedia={setViewerMedia} onOpenFile={setSecureFileViewer}/>}
+      {secureFileViewer&&<SecureFileViewer file={secureFileViewer} onClose={()=>setSecureFileViewer(null)}/>}
       {showDeleteSheet&&(
         <BulkDeleteSheet
           canDeleteForEveryone={canDeleteForEveryone}
@@ -883,6 +1004,7 @@ function AppShell({ me, profile }) {
   // the admin (always reachable, for Direct Chat to Admin) are visible.
   // Admin themselves is exempt from all of this (handled separately below).
   useEffect(() => listenKnownContacts(me.uid, setKnownContacts), [me.uid]);
+  useEffect(() => { ensureIdentityKey(me.uid).catch(() => {}); }, [me.uid]);
   useEffect(() => onValue(ref(db, 'config/adminUid'), s => setAdminUid(s.val())), []);
 
   const visibleUids = useMemo(() => {
@@ -894,12 +1016,15 @@ function AppShell({ me, profile }) {
 
   useEffect(() => {
     if (profile.role === 'admin') return undefined; // admin uses its own full-list read, below
+    setUsers(prev => prev.filter(u => visibleUids.includes(u.uid) && typeof u.name === 'string' && u.name.trim()));
     const stops = visibleUids.map(uid => onValue(ref(db, `users/${uid}`), s => {
       const val = s.val();
+      const valid = val && typeof val === 'object' && typeof val.name === 'string' && val.name.trim();
       setUsers(prev => {
         const rest = prev.filter(u => u.uid !== uid);
-        return val ? [...rest, { uid, ...val }] : rest;
+        return valid ? [...rest, { uid, ...val }] : rest;
       });
+      if (!valid && val !== null) removeKnownContact(me.uid, uid).catch(() => {});
     }));
     return () => stops.forEach(stop => stop && stop());
   }, [visibleUids, profile.role]);
@@ -911,7 +1036,7 @@ function AppShell({ me, profile }) {
     if (profile.role !== 'admin') return undefined;
     return onValue(ref(db, 'users'), s => {
       const all = s.val() || {};
-      setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid));
+      setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid && u && typeof u.name === 'string' && u.name.trim()));
     });
   }, [me.uid, profile.role]);
 
@@ -1029,6 +1154,7 @@ function AppShell({ me, profile }) {
   }, [users, me.uid, notificationsReady, chatUser?.uid]);
 
   const filtered = useMemo(() => users
+    .filter(u => u && u.uid && typeof u.name === 'string' && u.name.trim())
     .filter(u =>
       (u.name || '').toLowerCase().includes(query.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(query.toLowerCase()) ||
@@ -1362,6 +1488,49 @@ function ProfileEditPanel({ me, profile, onClose }) {
   );
 }
 
+function PrivacySettingsPanel({ uid, onBack }) {
+  const { t } = usePrefs();
+  const [unlocked, setUnlocked] = useState(false);
+  const [secureKey, setSecureKey] = useState('');
+  const [pinForSession, setPinForSession] = useState('');
+  const pinRef = useRef('');
+  const setupPromise = useRef(null);
+  const setupPinRef = useRef('');
+  const [error, setError] = useState('');
+  const enabled = isPrivacyPinSet();
+
+  async function reveal(pin) {
+    pinRef.current = pin;
+    setPinForSession(pin);
+    try { setSecureKey(await getPersonalSecureKey(uid, pin)); setUnlocked(true); setError(''); }
+    catch (e) { setError(e?.message || t('secureKeyUnavailable')); }
+  }
+
+  async function removeLock() {
+    if (!pinForSession) return;
+    try {
+      await disableIdentityProtection(uid, pinForSession);
+      clearPrivacyPin();
+      setUnlocked(false); setSecureKey(''); setPinForSession('');
+    } catch (e) { setError(e?.message || t('secureKeyUnavailable')); }
+  }
+
+  return <div className="privacy-panel">
+    <PanelHeader title={t('privacy')} onBack={onBack} />
+    {!enabled ? <><p>{t('privacySetupDescription')}</p><PinPad mode="set" storageKey={PRIVACY_PIN_KEY}
+      onSet={pin => { setupPinRef.current = pin; setupPromise.current = protectIdentityWithPin(uid, pin); }}
+      onSuccess={async () => { try { await setupPromise.current; await reveal(setupPinRef.current || ''); } catch (e) { clearPrivacyPin(); setError(e?.message || t('secureKeyUnavailable')); } }}
+      onCancel={onBack} />
+    </> : !unlocked ? <><p>{t('privacyKeyRequiresLock')}</p><PinPad mode="verify" storageKey={PRIVACY_PIN_KEY} onVerified={pin=>{pinRef.current=pin;setPinForSession(pin)}} onSuccess={() => reveal(pinRef.current)} onCancel={onBack}/></> : <div className="secure-key-panel">
+      <ShieldCheck size={30}/><b>{t('yourSecureKey')}</b><div className="secure-key-display">{secureKey}</div>
+      <p className="muted small">{t('secureKeyDeviceOnly')}</p>
+      <button className="secondary" onClick={() => navigator.clipboard?.writeText(secureKey).catch(() => {})}>{t('copy')}</button>
+      <button className="link danger-link" onClick={removeLock}>{t('removePrivacyLock')}</button>
+    </div>}
+    {error && <div className="error">{error}</div>}
+  </div>;
+}
+
 function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdmin, onOpenMyStatus, onAddStatus, hasMyStatus }) {
   const { t, lang, setLang, theme, setTheme, background, setBackground } = usePrefs();
   const [panel, setPanel] = useState('main');
@@ -1410,6 +1579,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
     <div className="pin-page"><PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} /></div>
     {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>{t('removeAppLock')}</button>}
   </>;
+  else if (panel === 'privacy') panelContent = <PrivacySettingsPanel uid={me.uid} onBack={() => setPanel('main')} />;
   else if (panel === 'update') panelContent = <>
     <PanelHeader title={t('update')} onBack={() => setPanel('main')} />
     <div className="update-panel">
@@ -1438,6 +1608,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
       <button className="setting-row" onClick={() => setPanel('theme')}><LayoutGrid /> {t('theme')} <span className="row-end status-text">{theme === 'light' ? t('themeLight') : theme === 'dark' ? t('themeDark') : t('themeSystem')}</span></button>
       <button className="setting-row" onClick={() => setPanel('background')}><LayoutGrid /> {t('background')} <span className="row-end status-text">{background==='none'?t('backgroundNone'):t('backgroundPattern')}</span></button>
       <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
+      <button className="setting-row" onClick={() => setPanel('privacy')}><Lock /> {t('privacy')} <span className="row-end status-text">{isPrivacyPinSet() ? t('on') : t('off')}</span></button>
       <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> {t('update')} <span className="row-end status-text">v{APP_VERSION}</span></button>
       {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> {t('adminDashboardOpen')} <span className="row-end">›</span></button>}
       <button className="setting-row danger" onClick={() => setPanel('logout')}><LogOut /> {t('logout')}</button>
