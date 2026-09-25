@@ -1,89 +1,372 @@
-name: Unzip and Flatten Project
+name: Build School Chat APK
 
-# Trigger: whenever a .zip file is pushed/uploaded to the repo root (also
-# runnable manually from the Actions tab via "Run workflow").
 on:
-  push:
-    paths:
-      - '**.zip'
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
-# Needed so this workflow's own commit/push back to the repo is allowed.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  unzip:
-    name: Extract uploaded zip into repo root
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # NOTE: कोई `working-directory` नहीं है। प्रोजेक्ट repo के root में है
+    # (package.json, capacitor.config.json, native/, src/ सब root पर),
+    # पुराने "SchoolChatApp" सबफोल्डर की वजह से ही build फेल हो रहा था।
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v5
 
-      - name: Extract every zip at repo root and flatten into root
+      - name: Verify project layout
         run: |
-          set -e
-          shopt -s nullglob
-
-          # Exact filename of the project zip you upload to repo root.
-          # If you upload a zip with a different name later, this still
-          # works — it's just checked first, then any other *.zip is
-          # picked up automatically below.
-          KNOWN_ZIP="ESP32-Flasher-PROJECT-NO-GITHUB-FOLDER.zip"
-
-          zips=(*.zip)
-          if [ -f "$KNOWN_ZIP" ]; then
-            echo "Found known zip: $KNOWN_ZIP"
-          fi
-
-          if [ ${#zips[@]} -eq 0 ]; then
-            echo "No .zip file found at repo root. Nothing to do."
-            exit 0
-          fi
-
-          for zipfile in "${zips[@]}"; do
-            echo "=== Extracting: $zipfile ==="
-            tmpdir=$(mktemp -d)
-            unzip -o "$zipfile" -d "$tmpdir" > /dev/null
-
-            # If the zip has a single top-level wrapper folder (common with
-            # GitHub-style "project-main/" exports), descend into it so its
-            # *contents* land at repo root instead of the wrapper itself.
-            src="$tmpdir"
-            entries=("$tmpdir"/*)
-            if [ ${#entries[@]} -eq 1 ] && [ -d "${entries[0]}" ]; then
-              src="${entries[0]}"
-              echo "Detected single wrapper folder: $(basename "$src")"
+          for f in package.json capacitor.config.json index.html src/main.jsx \
+                   public/school-chat-icon.png \
+                   native/AudioRouter/AudioRouterPlugin.java \
+                   native/CatboxUploader/CatboxUploaderPlugin.java \
+                   native/MediaCache/MediaCachePlugin.java \
+                   native/SystemBars/SystemBarsPlugin.java; do
+            if [ ! -f "$f" ]; then
+              echo "::error::ज़रूरी फाइल नहीं मिली: $f (repo root पर होनी चाहिए)"
+              echo "Repo root में मौजूद चीज़ें:"; ls -la
+              exit 1
             fi
-
-            # Copy everything into repo root EXCEPT .github — the default
-            # GITHUB_TOKEN this workflow runs with is never allowed to
-            # create/modify files under .github/workflows/, and a push that
-            # tries to will simply fail. Add/update workflow files manually
-            # instead (GitHub web UI: Add file > Create new file).
-            find "$src" -mindepth 1 -maxdepth 1 ! -name '.github' -exec cp -a -t . {} +
-
-            rm -rf "$tmpdir"
-            git rm -f "$zipfile" > /dev/null
-            echo "=== Done: $zipfile ==="
           done
+          echo "Project layout ठीक है।"
 
-      - name: Commit and push extracted files
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund --legacy-peer-deps
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install image tooling
+        run: python -m pip install Pillow
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # हर run में नया debug keystore बनने से हर APK अलग key से sign होता है और
+      # Android पुराने ऐप के ऊपर install नहीं होने देता। इसलिए एक fixed keystore
+      # cache में रखते हैं (standard debug alias/passwords के साथ, ताकि Gradle
+      # का default debug signingConfig उसे अपने-आप उठा ले)।
+      - name: Restore stable debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: schoolchat-debug-keystore-v1
+
+      - name: Generate the debug key if the cache was empty
         run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Belt-and-braces: never stage anything under .github, even if it
-          # somehow ended up on disk (e.g. a leftover from a previous run).
-          git add -A -- . ':!.github'
-
-          if git diff --cached --quiet; then
-            echo "Nothing to commit."
-            exit 0
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          git commit -m "Auto-extract uploaded project zip"
-          git push
+      - name: Add Android platform and sync plugins
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Add native plugins (AudioRouter, CatboxUploader, MediaCache, SystemBars) + edge-to-edge window
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          pkg = Path('android/app/src/main/java/com/aditya/schoolchat')
+          pkg.mkdir(parents=True, exist_ok=True)
+
+          for src in ('native/AudioRouter/AudioRouterPlugin.java',
+                      'native/CatboxUploader/CatboxUploaderPlugin.java',
+                      'native/MediaCache/MediaCachePlugin.java',
+                      'native/SystemBars/SystemBarsPlugin.java'):
+              (pkg / Path(src).name).write_text(Path(src).read_text(encoding='utf-8'), encoding='utf-8')
+
+          # MainActivity पूरी तरह नए सिरे से लिखते हैं (template पर string-replace
+          # नहीं)। Capacitor की शर्त: registerPlugin() हमेशा super.onCreate()
+          # से *पहले* होना चाहिए, वरना plugin रजिस्टर ही नहीं होता। एज-टू-एज
+          # लगाना cosmetic है, इसलिए try/catch में रखा है ताकि किसी OEM पर वो
+          # fail हो भी जाए तो पूरा ऐप क्रैश न हो। कीबोर्ड खुलने पर स्क्रीन खुद
+          # resize हो (SOFT_INPUT_ADJUST_RESIZE), ताकि टाइप बार और जो टाइप हो
+          # रहा है वो कीबोर्ड के पीछे न छुपे।
+          (pkg / 'MainActivity.java').write_text(
+              'package com.aditya.schoolchat;\n'
+              '\n'
+              'import android.os.Bundle;\n'
+              'import android.view.WindowManager;\n'
+              'import com.getcapacitor.BridgeActivity;\n'
+              '\n'
+              'public class MainActivity extends BridgeActivity {\n'
+              '    @Override\n'
+              '    public void onCreate(Bundle savedInstanceState) {\n'
+              '        registerPlugin(AudioRouterPlugin.class);\n'
+              '        registerPlugin(CatboxUploaderPlugin.class);\n'
+              '        registerPlugin(MediaCachePlugin.class);\n'
+              '        registerPlugin(SystemBarsPlugin.class);\n'
+              '        super.onCreate(savedInstanceState);\n'
+              '        getWindow().setSoftInputMode(\n'
+              '            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE\n'
+              '            | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);\n'
+              '        try {\n'
+              '            SystemBarsPlugin.apply(getWindow(), false);\n'
+              '        } catch (Exception ignored) {\n'
+              '            // System-bar styling is cosmetic only; never let it crash startup.\n'
+              '        }\n'
+              '    }\n'
+              '}\n',
+              encoding='utf-8')
+
+          # Capacitor का डिफ़ॉल्ट थीम startup पर status/navigation bar को एक ठोस
+          # (opaque) रंग से भर देता है, जो SystemBars plugin के transparent
+          # bars के ऊपर एक पल के लिए दिख जाता है। यहाँ उसे भी transparent कर
+          # देते हैं ताकि शुरुआत से ही bars पारदर्शी रहें। पैच सिर्फ़ उसी
+          # <style name="AppTheme"> ब्लॉक के अंदर होता है (पूरी फाइल में नहीं),
+          # ताकि किसी और स्टाइल (जैसे AppTheme.NoActionBarLaunch) पर गलती से
+          # असर न पड़े।
+          def patch_named_style(text, style_name, items):
+              for m in re.finditer(r'<style\s+name="' + re.escape(style_name) + r'"[^>]*>.*?</style>', text, flags=re.S):
+                  block = m.group(0)
+                  new_block = block
+                  for name, value in items.items():
+                      pattern = rf'<item\s+name="android:{re.escape(name)}">.*?</item>'
+                      replacement = f'<item name="android:{name}">{value}</item>'
+                      if re.search(pattern, new_block, flags=re.S):
+                          new_block = re.sub(pattern, replacement, new_block, count=1, flags=re.S)
+                      else:
+                          new_block = new_block.replace('</style>', f'        {replacement}\n</style>', 1)
+                  return text[:m.start()] + new_block + text[m.end():], True
+              return text, False
+
+          for theme_file in list(Path('android/app/src/main/res').glob('values*/styles.xml')) + list(Path('android/app/src/main/res').glob('values*/themes.xml')):
+              theme_text = theme_file.read_text(encoding='utf-8')
+              if 'name="AppTheme"' not in theme_text:
+                  continue
+              theme_text, ok = patch_named_style(theme_text, 'AppTheme', {
+                  'windowDrawsSystemBarBackgrounds': 'true',
+                  'statusBarColor': '@android:color/transparent',
+                  'navigationBarColor': '@android:color/transparent',
+              })
+              if ok:
+                  theme_file.write_text(theme_text, encoding='utf-8')
+                  print(f'Patched transparent AppTheme bars: {theme_file}')
+              break
+
+          print('Native plugins, edge-to-edge MainActivity और theme तैयार।')
+          PY
+
+      - name: Grant Android permissions (mic, camera, bluetooth, notifications)
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text(encoding='utf-8')
+
+          permissions = [
+              ('INTERNET', ''),
+              ('CAMERA', ''),
+              ('RECORD_AUDIO', ''),
+              ('MODIFY_AUDIO_SETTINGS', ''),
+              ('BLUETOOTH_CONNECT', ''),
+              ('BLUETOOTH_SCAN', ' android:usesPermissionFlags="neverForLocation"'),
+              ('POST_NOTIFICATIONS', ''),
+          ]
+          for name, extra in permissions:
+              if re.search(r'android:name="android\.permission\.' + name + r'"', text):
+                  continue
+              line = '    <uses-permission android:name="android.permission.%s"%s />\n' % (name, extra)
+              if '<application' not in text:
+                  raise SystemExit('AndroidManifest.xml में <application> टैग नहीं मिला')
+              text = text.replace('<application', line + '    <application', 1)
+
+          manifest.write_text(text, encoding='utf-8')
+          print('Manifest permissions तैयार।')
+          PY
+
+      - name: Apply School Chat launcher icon (legacy + adaptive)
+        run: |
+          python - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+
+          res = Path('android/app/src/main/res')
+          src = Image.open('public/school-chat-icon.png').convert('RGBA')
+
+          # 1) Legacy flat icons (हर density)
+          sizes = {
+              'mipmap-mdpi': 48, 'mipmap-hdpi': 72, 'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144, 'mipmap-xxxhdpi': 192,
+          }
+          for folder, size in sizes.items():
+              out = res / folder
+              out.mkdir(parents=True, exist_ok=True)
+              img = src.resize((size, size), Image.Resampling.LANCZOS)
+              img.save(out / 'ic_launcher.png')
+              img.save(out / 'ic_launcher_round.png')
+
+          # 2) Adaptive icon (Android 8+). Foreground के चारों तरफ transparent
+          #    padding चाहिए (safe zone ~ अंदर का 66%)।
+          fg_sizes = {
+              'mipmap-mdpi': 108, 'mipmap-hdpi': 162, 'mipmap-xhdpi': 216,
+              'mipmap-xxhdpi': 324, 'mipmap-xxxhdpi': 432,
+          }
+          for folder, canvas in fg_sizes.items():
+              out = res / folder
+              out.mkdir(parents=True, exist_ok=True)
+              inner = int(canvas * 0.66)
+              icon = src.resize((inner, inner), Image.Resampling.LANCZOS)
+              fg = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
+              pos = ((canvas - inner) // 2, (canvas - inner) // 2)
+              fg.paste(icon, pos, icon)
+              fg.save(out / 'ic_launcher_foreground.png')
+
+          values = res / 'values'
+          values.mkdir(parents=True, exist_ok=True)
+          (values / 'ic_launcher_background.xml').write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
+              '    <color name="ic_launcher_background">#0f6fe8</color>\n'
+              '</resources>\n',
+              encoding='utf-8')
+
+          anydpi = res / 'mipmap-anydpi-v26'
+          anydpi.mkdir(parents=True, exist_ok=True)
+          adaptive_xml = (
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <background android:drawable="@color/ic_launcher_background"/>\n'
+              '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n'
+              '</adaptive-icon>\n'
+          )
+          (anydpi / 'ic_launcher.xml').write_text(adaptive_xml, encoding='utf-8')
+          (anydpi / 'ic_launcher_round.xml').write_text(adaptive_xml, encoding='utf-8')
+          print('Launcher icons तैयार।')
+          PY
+
+      - name: Generate native splash screen
+        run: |
+          python - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+
+          res = Path('android/app/src/main/res')
+          icon = Image.open('public/school-chat-icon.png').convert('RGBA')
+
+          size = 1200
+          bg = Image.new('RGBA', (size, size), (15, 111, 232, 255))  # capacitor.config.json के backgroundColor जैसा
+          icon_size = int(size * 0.42)
+          icon_resized = icon.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
+          pos = ((size - icon_size) // 2, (size - icon_size) // 2)
+          bg.paste(icon_resized, pos, icon_resized)
+
+          for folder in ('drawable', 'drawable-night'):
+              out_dir = res / folder
+              out_dir.mkdir(parents=True, exist_ok=True)
+              bg.convert('RGB').save(out_dir / 'splash.png')
+          print('Splash screen तैयार।')
+          PY
+
+      - name: Point Android 12+'s own native splash at the School Chat icon
+        run: |
+          python - <<'PY'
+          # Android 12+ (API 31+) shows its OWN splash screen -- driven by
+          # windowSplashScreenAnimatedIcon / windowSplashScreenBackground in the
+          # *Theme.SplashScreen*-derived style, not by @drawable/splash -- for
+          # the brief moment before the WebView finishes loading. Without this,
+          # Android falls back to a generic/undersized icon that does not match
+          # our School Chat logo. ic_launcher_foreground (already generated
+          # above, safe-zoned per the adaptive-icon spec) is what we point it
+          # at, so both native splash phases show the same recognizable icon.
+          import re
+          from pathlib import Path
+
+          def patch_style_block(text, must_contain, items):
+              # Isolate just the one <style ...>...</style> element whose body
+              # contains `must_contain` (e.g. parent="...Theme.SplashScreen..."),
+              # and only edit inside that slice -- never the whole file, so a
+              # same-named item elsewhere in the file is never touched.
+              for m in re.finditer(r'<style\b[^>]*>.*?</style>', text, flags=re.S):
+                  block = m.group(0)
+                  if must_contain not in block:
+                      continue
+                  new_block = block
+                  for name, value in items.items():
+                      pattern = rf'<item\s+name="{re.escape(name)}">.*?</item>'
+                      replacement = f'<item name="{name}">{value}</item>'
+                      if re.search(pattern, new_block, flags=re.S):
+                          new_block = re.sub(pattern, replacement, new_block, count=1, flags=re.S)
+                      else:
+                          new_block = new_block.replace('</style>', f'        {replacement}\n</style>', 1)
+                  return text[:m.start()] + new_block + text[m.end():], True
+              return text, False
+
+          patched = False
+          for theme_file in list(Path('android/app/src/main/res').glob('values*/styles.xml')) + list(Path('android/app/src/main/res').glob('values*/themes.xml')):
+              text = theme_file.read_text(encoding='utf-8')
+              if 'Theme.SplashScreen' not in text:
+                  continue
+              new_text, ok = patch_style_block(text, 'Theme.SplashScreen', {
+                  'windowSplashScreenBackground': '#0F6FE8',
+                  'windowSplashScreenAnimatedIcon': '@mipmap/ic_launcher_foreground',
+              })
+              if ok:
+                  theme_file.write_text(new_text, encoding='utf-8')
+                  print(f'Patched Android 12+ splash icon in: {theme_file}')
+                  patched = True
+          if not patched:
+              print('No Theme.SplashScreen style found -- Android 12+ native splash left at its default; the JS in-app splash still shows the correct icon.')
+          PY
+
+      - name: Verify web assets were copied into the Android project
+        run: |
+          if [ ! -f "android/app/src/main/assets/public/index.html" ]; then
+            echo "::error::android/app/src/main/assets/public/index.html नहीं मिली — 'npx cap sync' ने web build कॉपी नहीं की।"
+            exit 1
+          fi
+          echo "Web assets ठीक से Android प्रोजेक्ट में कॉपी हो गए।"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # पुराना standalone "tools" package अब SDK repository में नहीं है, इसलिए
+          # default packages ("tools platform-tools") फेल हो जाते हैं। सिर्फ
+          # platform-tools चाहिए; बाकी platform/build-tools Gradle खुद ले लेता है।
+          packages: 'platform-tools'
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: school-chat-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
