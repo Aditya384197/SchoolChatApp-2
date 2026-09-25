@@ -3,6 +3,13 @@
 // translated (that's real content/data, not interface copy).
 export const translations = {
   hi: {
+    privacy: "प्राइवेसी", privacyHint: "यहाँ अपनी 'प्राइवेसी की' बनाएं ताकि दूसरे आपके लिए मैसेज/फाइल लॉक करके भेज सकें, और आप लॉक हुए मैसेज खोल सकें। इसके लिए एक अलग पासवर्ड चाहिए।", privacyPasswordNew: "नया प्राइवेसी पासवर्ड",
+    privacyPasswordOld: "पुराना प्राइवेसी पासवर्ड", privacyPasswordEnter: "प्राइवेसी पासवर्ड डालें", privacyPasswordShort: "पासवर्ड कम से कम 6 अक्षर का होना चाहिए और दोनों बार एक जैसा होना चाहिए।",
+    privacyCreate: "प्राइवेसी की बनाएं", privacyUnlock: "अनलॉक करें", privacyUnlocked: "आपकी प्राइवेसी की अनलॉक है (कुछ मिनट के लिए)",
+    privacyKeyId: "आपकी की आईडी", privacyLockNow: "अभी लॉक करें", privacyChangePassword: "पासवर्ड बदलें",
+    lockedMessage: "लॉक किया हुआ मैसेज — खोलने के लिए टैप करें", privacyKeyMissing: "इस मैसेज को खोलने के लिए चाबी नहीं मिली।", privacyKeyMissingSetup: "इसे खोलने के लिए पहले अपनी प्राइवेसी की बनाएं।",
+    privacyDecryptFailed: "मैसेज खोला नहीं जा सका।", lockToggleOn: "मैसेज लॉक करके भेजें", lockToggleOff: "लॉक हटाएं",
+    tooManyAttempts: "बहुत बार गलत कोशिश। कुछ देर बाद फिर कोशिश करें।",
     decline: "काटें", accept: "उठाएं",
     appName: 'School Chat', tagline: 'अपने समूह से जुड़े रहें',
     
@@ -68,18 +75,16 @@ export const translations = {
     editBtn: "एडिट", uploading: "अपलोड हो रहा है…", userIdInvalidMix: "आईडी सेव नहीं हो पाएगी — इसमें अक्षर और अंक दोनों होने चाहिए।",
     userIdInvalidLength: "आईडी 4 से 20 अक्षरों की होनी चाहिए।", userIdInvalidChars: "आईडी में सिर्फ़ अक्षर, अंक और _ चलेंगे।", userIdTaken: "यह आईडी पहले से किसी ने ले रखी है, दूसरी चुनें।",
     userIdHint: "आप अपनी आईडी बदल सकते हैं। उसमें अक्षर और अंक दोनों ज़रूरी हैं (4–20 वर्ण)। दोस्त इसी आईडी से आपको ढूंढते हैं।", myStatus: "मेरा स्टेटस", langTelugu: "తెలుగు",
-
-    // Privacy / locked attachments
-    privacy: 'गोपनीयता', privacySetupDescription: 'लॉक की गई फ़ाइलें खोलने के लिए अलग गोपनीयता पिन बनाएं। इसके बाद आपकी निजी सुरक्षित कुंजी इसी डिवाइस पर सुरक्षित रहेगी।',
-    privacyKeyRequiresLock: 'सुरक्षित कुंजी देखने के लिए पहले अपनी गोपनीयता पिन दर्ज करें।', privacyLock: 'गोपनीयता लॉक', privacyLockSetup: 'गोपनीयता लॉक बनाएं', privacyLockSetupHint: 'यह अलग 4 अंकों का पिन लॉक की गई फ़ाइलों की निजी कुंजी की सुरक्षा करेगा।',
-    privacyLockEnter: 'अपनी गोपनीयता पिन दर्ज करें।', privacyUnlockThenKey: 'पिन सही होने पर आपकी निजी सुरक्षित कुंजी दिखाई जाएगी।', yourSecureKey: 'आपकी सुरक्षित कुंजी', secureKeyDeviceOnly: 'यह कुंजी केवल इस डिवाइस पर उपलब्ध निजी कुंजी के साथ लॉक की गई फ़ाइलें खोलती है। इसे किसी के साथ साझा न करें।',
-    removePrivacyLock: 'गोपनीयता लॉक हटाएं', secureKeyPrompt: 'फ़ाइल खोलने के लिए अपनी सुरक्षित कुंजी दर्ज करें।', enterSecureKey: 'सुरक्षित कुंजी', openSecureFile: 'फ़ाइल खोलें', openingSecureFile: 'फ़ाइल खोली जा रही है…',
-loadingMessages: 'संदेश लोड हो रहे हैं…', secureKeyInvalid: 'सुरक्षित कुंजी गलत है।', recipientKeyMissing: 'प्राप्तकर्ता ने इस नए संस्करण को अभी नहीं खोला है। उसे कम से कम एक बार ऐप खोलना होगा, फिर लॉक की गई फ़ाइल भेजी जा सकेगी।', secureKeyUnavailable: 'सुरक्षित कुंजी इस डिवाइस पर उपलब्ध नहीं है।', secureFileOpenFailed: 'लॉक की गई फ़ाइल नहीं खुल सकी।', secureFileReady: 'लॉक की गई फ़ाइल तैयार है', downloadSecureFile: 'फ़ाइल डाउनलोड करें',
-    lockedAttachment: '🔐 लॉक की गई फ़ाइल', lockedAttachmentInfo: 'यह फ़ाइल प्राप्तकर्ता की सुरक्षित कुंजी से एन्क्रिप्ट की गई है।', lockAttachment: 'फ़ाइल लॉक करें', unlockAttachment: 'लॉक हटाएं', locked: 'लॉक', lock: 'लॉक करें',
-    tooManyPinAttempts: 'बहुत अधिक गलत प्रयास', tryAgainIn: 'फिर से प्रयास करें', encryptedForRecipient: 'प्राप्तकर्ता के लिए एन्क्रिप्टेड', tapToUnlock: 'खोलने के लिए टैप करें',
     langMarathi: "मराठी", langPunjabi: "ਪੰਜਾਬੀ",
   },
   en: {
+    privacy: "Privacy", privacyHint: "Create your Privacy Key here so others can lock messages/files for you, and you can open locked messages. It needs its own password.", privacyPasswordNew: "New Privacy Password",
+    privacyPasswordOld: "Old Privacy Password", privacyPasswordEnter: "Enter Privacy Password", privacyPasswordShort: "Password must be at least 6 characters and match both times.",
+    privacyCreate: "Create Privacy Key", privacyUnlock: "Unlock", privacyUnlocked: "Your Privacy Key is unlocked (for a few minutes)",
+    privacyKeyId: "Your Key ID", privacyLockNow: "Lock now", privacyChangePassword: "Change password",
+    lockedMessage: "Locked message — tap to open", privacyKeyMissing: "Could not find the key to open this message.", privacyKeyMissingSetup: "Create your Privacy Key first to open this.",
+    privacyDecryptFailed: "Could not open the message.", lockToggleOn: "Send message locked", lockToggleOff: "Remove lock",
+    tooManyAttempts: "Too many attempts. Try again shortly.",
     decline: "Decline", accept: "Accept",
     appName: 'School Chat', tagline: 'Stay connected with your group',
     
@@ -139,18 +144,16 @@ loadingMessages: 'संदेश लोड हो रहे हैं…', secu
     editBtn: "Edit", uploading: "Uploading…", userIdInvalidMix: "ID could not be saved — it must contain both letters and numbers.",
     userIdInvalidLength: "The ID must be 4 to 20 characters long.", userIdInvalidChars: "Only letters, numbers and _ are allowed in the ID.", userIdTaken: "This ID is already taken. Try another one.",
     userIdHint: "You can change your ID. It must contain both letters and numbers (4–20 characters). Friends find you with this ID.", myStatus: "My status", langTelugu: "తెలుగు",
-
-    // Privacy / locked attachments
-    privacy: 'Privacy', privacySetupDescription: 'Create a separate privacy PIN for locked files. Your personal secure key is then protected on this device.',
-    privacyKeyRequiresLock: 'Enter your privacy PIN first to reveal your personal secure key.', privacyLock: 'Privacy Lock', privacyLockSetup: 'Set Privacy Lock', privacyLockSetupHint: 'This separate 4-digit PIN protects the private key used to open locked files.',
-    privacyLockEnter: 'Enter your privacy PIN.', privacyUnlockThenKey: 'After the PIN is verified, your personal secure key will be shown.', yourSecureKey: 'Your Secure Key', secureKeyDeviceOnly: 'This key works together with the private key stored on this device to open locked files. Never share it with anyone.',
-    removePrivacyLock: 'Remove Privacy Lock', secureKeyPrompt: 'Enter your secure key to open this file.', enterSecureKey: 'Secure key', openSecureFile: 'Open file', openingSecureFile: 'Opening file…',
-    loadingMessages: 'Loading messages…',     secureKeyInvalid: 'The secure key is incorrect.', recipientKeyMissing: 'The recipient must open this latest version once before a locked file can be sent to them.', secureKeyUnavailable: 'The secure key is unavailable on this device.', secureFileOpenFailed: 'The locked file could not be opened.', secureFileReady: 'Locked file ready', downloadSecureFile: 'Download file',
-    lockedAttachment: '🔐 Locked attachment', lockedAttachmentInfo: 'This file is encrypted for the intended recipient.', lockAttachment: 'Lock file', unlockAttachment: 'Remove lock', locked: 'Locked', lock: 'Lock',
-    tooManyPinAttempts: 'Too many incorrect attempts', tryAgainIn: 'Try again in', encryptedForRecipient: 'Encrypted for recipient', tapToUnlock: 'Tap to unlock',
     langMarathi: "मराठी", langPunjabi: "ਪੰਜਾਬੀ",
   },
   te: {
+    privacy: "ప్రైవసీ", privacyHint: "ఇతరులు మీ కోసం సందేశాలు/ఫైళ్లు లాక్ చేసి పంపేలా, మరియు మీరు లాక్ చేసిన సందేశాలను తెరిచేలా ఇక్కడ మీ ప్రైవసీ కీని సృష్టించండి. దీనికి ప్రత్యేక పాస్‌వర్డ్ కావాలి.", privacyPasswordNew: "కొత్త ప్రైవసీ పాస్‌వర్డ్",
+    privacyPasswordOld: "పాత ప్రైవసీ పాస్‌వర్డ్", privacyPasswordEnter: "ప్రైవసీ పాస్‌వర్డ్ నమోదు చేయండి", privacyPasswordShort: "పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి మరియు రెండుసార్లు సరిపోలాలి.",
+    privacyCreate: "ప్రైవసీ కీ సృష్టించండి", privacyUnlock: "అన్‌లాక్", privacyUnlocked: "మీ ప్రైవసీ కీ అన్‌లాక్ అయింది (కొన్ని నిమిషాలు)",
+    privacyKeyId: "మీ కీ ఐడి", privacyLockNow: "ఇప్పుడు లాక్ చేయండి", privacyChangePassword: "పాస్‌వర్డ్ మార్చండి",
+    lockedMessage: "లాక్ చేయబడిన సందేశం — తెరవడానికి నొక్కండి", privacyKeyMissing: "ఈ సందేశాన్ని తెరవడానికి కీ దొరకలేదు.", privacyKeyMissingSetup: "దీన్ని తెరవడానికి ముందు మీ ప్రైవసీ కీని సృష్టించండి.",
+    privacyDecryptFailed: "సందేశం తెరవలేకపోయాము.", lockToggleOn: "సందేశాన్ని లాక్ చేసి పంపండి", lockToggleOff: "లాక్ తీసివేయండి",
+    tooManyAttempts: "చాలా సార్లు తప్పు ప్రయత్నం. కొద్దిసేపటి తర్వాత మళ్ళీ ప్రయత్నించండి.",
     decline: "తిరస్కరించు", accept: "స్వీకరించు",
     tagline: "మీ గ్రూప్‌తో కనెక్ట్ అయి ఉండండి", email: "ఇమెయిల్", password: "పాస్‌వర్డ్",
     phone: "మొబైల్ నంబర్", optional: "ఐచ్ఛికం", name: "అసలు పేరు",
@@ -215,6 +218,13 @@ loadingMessages: 'संदेश लोड हो रहे हैं…', secu
     myStatus: "నా స్టేటస్",
   },
   mr: {
+    privacy: "गोपनीयता", privacyHint: "इतरांना तुमच्यासाठी संदेश/फाइल लॉक करून पाठवता याव्यात आणि तुम्ही लॉक केलेले संदेश उघडू शकावेत यासाठी इथे तुमची प्रायव्हसी की तयार करा. यासाठी वेगळा पासवर्ड लागतो.", privacyPasswordNew: "नवीन प्रायव्हसी पासवर्ड",
+    privacyPasswordOld: "जुना प्रायव्हसी पासवर्ड", privacyPasswordEnter: "प्रायव्हसी पासवर्ड टाका", privacyPasswordShort: "पासवर्ड किमान 6 अक्षरांचा असावा आणि दोन्ही वेळा सारखा असावा.",
+    privacyCreate: "प्रायव्हसी की तयार करा", privacyUnlock: "अनलॉक करा", privacyUnlocked: "तुमची प्रायव्हसी की अनलॉक आहे (काही मिनिटांसाठी)",
+    privacyKeyId: "तुमची की आयडी", privacyLockNow: "आत्ता लॉक करा", privacyChangePassword: "पासवर्ड बदला",
+    lockedMessage: "लॉक केलेला संदेश — उघडण्यासाठी टॅप करा", privacyKeyMissing: "हा संदेश उघडण्यासाठी चावी सापडली नाही.", privacyKeyMissingSetup: "हे उघडण्यासाठी आधी तुमची प्रायव्हसी की तयार करा.",
+    privacyDecryptFailed: "संदेश उघडता आला नाही.", lockToggleOn: "संदेश लॉक करून पाठवा", lockToggleOff: "लॉक काढा",
+    tooManyAttempts: "खूप वेळा चुकीचा प्रयत्न. थोड्या वेळाने पुन्हा प्रयत्न करा.",
     decline: "नाकारा", accept: "स्वीकारा",
     tagline: "तुमच्या ग्रुपशी जोडलेले राहा", email: "ईमेल", password: "पासवर्ड",
     phone: "मोबाइल नंबर", optional: "ऐच्छिक", name: "खरे नाव",
@@ -279,6 +289,13 @@ loadingMessages: 'संदेश लोड हो रहे हैं…', secu
     myStatus: "माझे स्टेटस",
   },
   pa: {
+    privacy: "ਪਰਦੇਦਾਰੀ", privacyHint: "ਦੂਜੇ ਤੁਹਾਡੇ ਲਈ ਸੁਨੇਹੇ/ਫਾਈਲਾਂ ਲੌਕ ਕਰਕੇ ਭੇਜ ਸਕਣ, ਅਤੇ ਤੁਸੀਂ ਲੌਕ ਕੀਤੇ ਸੁਨੇਹੇ ਖੋਲ੍ਹ ਸਕੋ, ਇਸ ਲਈ ਇੱਥੇ ਆਪਣੀ ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਬਣਾਓ। ਇਸ ਲਈ ਵੱਖਰਾ ਪਾਸਵਰਡ ਚਾਹੀਦਾ ਹੈ।", privacyPasswordNew: "ਨਵਾਂ ਪਰਦੇਦਾਰੀ ਪਾਸਵਰਡ",
+    privacyPasswordOld: "ਪੁਰਾਣਾ ਪਰਦੇਦਾਰੀ ਪਾਸਵਰਡ", privacyPasswordEnter: "ਪਰਦੇਦਾਰੀ ਪਾਸਵਰਡ ਪਾਓ", privacyPasswordShort: "ਪਾਸਵਰਡ ਘੱਟੋ-ਘੱਟ 6 ਅੱਖਰਾਂ ਦਾ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ ਅਤੇ ਦੋਵੇਂ ਵਾਰ ਇੱਕੋ ਜਿਹਾ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ।",
+    privacyCreate: "ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਬਣਾਓ", privacyUnlock: "ਅਨਲੌਕ ਕਰੋ", privacyUnlocked: "ਤੁਹਾਡੀ ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਅਨਲੌਕ ਹੈ (ਕੁਝ ਮਿੰਟਾਂ ਲਈ)",
+    privacyKeyId: "ਤੁਹਾਡੀ ਕੁੰਜੀ ਆਈਡੀ", privacyLockNow: "ਹੁਣੇ ਲੌਕ ਕਰੋ", privacyChangePassword: "ਪਾਸਵਰਡ ਬਦਲੋ",
+    lockedMessage: "ਲੌਕ ਕੀਤਾ ਸੁਨੇਹਾ — ਖੋਲ੍ਹਣ ਲਈ ਟੈਪ ਕਰੋ", privacyKeyMissing: "ਇਸ ਸੁਨੇਹੇ ਨੂੰ ਖੋਲ੍ਹਣ ਲਈ ਕੁੰਜੀ ਨਹੀਂ ਮਿਲੀ।", privacyKeyMissingSetup: "ਇਸਨੂੰ ਖੋਲ੍ਹਣ ਲਈ ਪਹਿਲਾਂ ਆਪਣੀ ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਬਣਾਓ।",
+    privacyDecryptFailed: "ਸੁਨੇਹਾ ਖੋਲ੍ਹਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ।", lockToggleOn: "ਸੁਨੇਹਾ ਲੌਕ ਕਰਕੇ ਭੇਜੋ", lockToggleOff: "ਲੌਕ ਹਟਾਓ",
+    tooManyAttempts: "ਬਹੁਤ ਵਾਰ ਗ਼ਲਤ ਕੋਸ਼ਿਸ਼। ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਫਿਰ ਕੋਸ਼ਿਸ਼ ਕਰੋ।",
     decline: "ਰੱਦ ਕਰੋ", accept: "ਚੁੱਕੋ",
     tagline: "ਆਪਣੇ ਗਰੁੱਪ ਨਾਲ ਜੁੜੇ ਰਹੋ", email: "ਈਮੇਲ", password: "ਪਾਸਵਰਡ",
     phone: "ਮੋਬਾਈਲ ਨੰਬਰ", optional: "ਵਿਕਲਪਿਕ", name: "ਅਸਲੀ ਨਾਮ",

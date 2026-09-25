@@ -69,7 +69,7 @@ public class CatboxUploaderPlugin extends Plugin {
                 // Stream straight onto the socket instead of letting
                 // HttpURLConnection buffer the whole 15 MB body in memory first.
                 connection.setFixedLengthStreamingMode(totalLength);
-                connection.setRequestProperty("User-Agent", "SchoolChat/1.6.3");
+                connection.setRequestProperty("User-Agent", "SchoolChat/1.5.0");
                 connection.setRequestProperty("Connection", "keep-alive");
                 connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
 
@@ -112,6 +112,51 @@ public class CatboxUploaderPlugin extends Plugin {
                 call.resolve(result);
             } catch (Exception e) {
                 call.reject(e.getMessage() == null ? "File upload failed." : e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
+
+    // Downloads a Catbox file and hands the bytes back as base64. Used to fetch
+    // locked (encrypted) attachments so they can be decrypted on-device --
+    // avoids the browser's CORS restrictions a plain fetch() would hit.
+    @PluginMethod
+    public void download(PluginCall call) {
+        final String url = call.getString("url", "");
+        if (url.isEmpty() || !url.startsWith("https://files.catbox.moe/")) {
+            call.reject("Invalid file link.");
+            return;
+        }
+        executor.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(url).openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(20_000);
+                connection.setReadTimeout(120_000);
+                int code = connection.getResponseCode();
+                if (code != 200) {
+                    call.reject("Download failed (HTTP " + code + ").");
+                    return;
+                }
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream())) {
+                    byte[] chunk = new byte[CHUNK_BYTES];
+                    int read;
+                    while ((read = in.read(chunk)) != -1) {
+                        buffer.write(chunk, 0, read);
+                        if (buffer.size() > MAX_BYTES) {
+                            call.reject("File is larger than 15 MB.");
+                            return;
+                        }
+                    }
+                }
+                JSObject result = new JSObject();
+                result.put("data", Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP));
+                call.resolve(result);
+            } catch (Exception e) {
+                call.reject("Download error: " + e.getMessage());
             } finally {
                 if (connection != null) connection.disconnect();
             }

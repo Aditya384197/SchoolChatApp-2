@@ -1,25 +1,12 @@
 import React from 'react';
-import { get, onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
+import { onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
 import { db } from '../firebase';
 import { chatIdFor } from './chat';
 import { clearAudioRoute } from './audioRoute';
 
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-];
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const CALL_RING_TIMEOUT_MS = 30 * 1000;
 const DISCONNECT_GRACE_MS = 8 * 1000;
-
-async function updateCallFields(callId, patch) {
-  if (!callId || !patch || typeof patch !== 'object') return;
-  const writes = {};
-  Object.entries(patch).forEach(([key, value]) => {
-    writes[`calls/${callId}/${key}`] = value;
-  });
-  await update(ref(db), writes);
-}
 
 function errorMessage(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
@@ -123,7 +110,7 @@ export function useVoiceCall({ uid, users }) {
     if (finishingRef.current && currentCallIdRef.current === callId) return;
     finishingRef.current = true;
     if (callId) {
-      await updateCallFields(callId, {
+      await update(ref(db, `calls/${callId}`), {
         status: 'ended',
         endedAt: Date.now(),
         endedBy: uid,
@@ -179,7 +166,7 @@ export function useVoiceCall({ uid, users }) {
 
   async function createPeer(callId, remoteUid, role) {
     const stream = await getMicrophoneStream();
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 8 });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
     stream.getTracks().forEach(track => pc.addTrack(track, stream));
     pc.ontrack = event => {
@@ -227,27 +214,6 @@ export function useVoiceCall({ uid, users }) {
     setCallError('');
     const callId = chatIdFor(uid, peer.uid);
     try {
-      // The app historically uses one deterministic call room per pair. If
-      // Android was killed during a previous call, that room can be left
-      // behind and reject a new create. Recover only stale ended/ringing
-      // records; never overwrite a genuinely active call.
-      try {
-        const existing = await get(ref(db, `calls/${callId}`));
-        const old = existing.val();
-        if (old) {
-          const age = Date.now() - Number(old.createdAt || 0);
-          if (old.status === 'ended' || (old.status === 'ringing' && age > (CALL_RING_TIMEOUT_MS + DISCONNECT_GRACE_MS))) {
-            await remove(ref(db, `calls/${callId}`));
-          } else {
-            throw new Error('This call is already in progress.');
-          }
-        }
-      } catch (checkError) {
-        // A brand-new call room is intentionally unreadable until it contains
-        // participants; a permission failure here is therefore safe to ignore.
-        if (checkError?.message === 'This call is already in progress.') throw checkError;
-      }
-
       const pc = await createPeer(callId, peer.uid, 'caller');
       // Create the parent call record BEFORE setLocalDescription() starts ICE
       // gathering. Otherwise an early candidate can hit RTDB before the
@@ -263,7 +229,7 @@ export function useVoiceCall({ uid, users }) {
       await pc.setLocalDescription(offer);
       setActiveCall({ chatId: callId, peer, direction: 'outgoing', status: 'ringing', startedAt: null });
       await onDisconnect(ref(db, `calls/${callId}/status`)).set('ended').catch(() => {});
-      await updateCallFields(callId, {
+      await update(ref(db, `calls/${callId}`), {
         offer: { type: offer.type, sdp: offer.sdp },
       });
       ringTimerRef.current = setTimeout(() => {
@@ -299,14 +265,14 @@ export function useVoiceCall({ uid, users }) {
       await pc.setLocalDescription(answer);
       setActiveCall({ chatId: call.chatId, peer, direction: 'incoming', status: 'connecting', startedAt: null });
       await onDisconnect(ref(db, `calls/${call.chatId}/status`)).set('ended').catch(() => {});
-      await updateCallFields(call.chatId, {
+      await update(ref(db, `calls/${call.chatId}`), {
         status: 'accepted',
         acceptedAt: Date.now(),
         answer: { type: answer.type, sdp: answer.sdp },
       });
     } catch (error) {
       setCallError(errorMessage(error));
-      await updateCallFields(call.chatId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+      await update(ref(db, `calls/${call.chatId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
       cleanupPeer();
       setActiveCall(null);
     }
@@ -314,7 +280,7 @@ export function useVoiceCall({ uid, users }) {
 
   async function declineCall(call = incomingRef.current) {
     if (!call?.chatId) return;
-    await updateCallFields(call.chatId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+    await update(ref(db, `calls/${call.chatId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
     setIncomingCall(null);
     setTimeout(() => remove(ref(db, `calls/${call.chatId}`)).catch(() => {}), 800);
   }
@@ -348,7 +314,7 @@ export function useVoiceCall({ uid, users }) {
           if (data.receiverId === uid && data.status === 'ringing' && data.callerId !== uid && data.offer) {
             const age = Date.now() - Number(data.createdAt || 0);
             if (age > CALL_RING_TIMEOUT_MS) {
-              updateCallFields(callId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+              update(ref(db, `calls/${callId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
               return;
             }
             if (!activeRef.current && !incomingRef.current) {
@@ -374,7 +340,7 @@ export function useVoiceCall({ uid, users }) {
 
   React.useEffect(() => () => {
     const callId = currentCallIdRef.current;
-    if (callId) updateCallFields(callId, { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
+    if (callId) update(ref(db, `calls/${callId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
     cleanupPeer();
   }, [uid]);
 

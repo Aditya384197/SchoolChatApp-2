@@ -1,7 +1,7 @@
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
 
 const CatboxUploader = registerPlugin('CatboxUploader');
-const MediaCache = registerPlugin('MediaCache');
 
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 export const MAX_STATUS_MEDIA_BYTES = MAX_UPLOAD_BYTES;
@@ -26,7 +26,7 @@ export function isSupportedAttachment(file) {
   return Boolean(getAttachmentKind(file));
 }
 
-async function compressImage(file) {
+export async function compressImage(file) {
   if (!file?.type?.startsWith('image/')) return file;
   if (file.size <= 900 * 1024 && file.type !== 'image/heic' && file.type !== 'image/heif') return file;
   try {
@@ -81,6 +81,7 @@ export async function uploadFileToCatbox(file, onProgress) {
   const prepared = await compressImage(file);
   if (prepared.size > MAX_UPLOAD_BYTES) throw new Error('File is larger than 15 MB.');
 
+  // Real progress comes from the native side (bytes actually sent).
   let listener = null;
   if (onProgress) {
     try {
@@ -112,6 +113,7 @@ export async function uploadChatMedia(_uid, _chatId, _messageId, file, onProgres
   return uploadFileToCatbox(file, onProgress);
 }
 
+// Kept as compatibility aliases for the current app code and older callers.
 export async function uploadChatImage(uid, chatId, messageId, file) {
   const result = await uploadChatMedia(uid, chatId, messageId, file);
   if (result.kind !== 'image') throw new Error('Please choose an image.');
@@ -124,91 +126,78 @@ export async function uploadStatusMedia(_uid, _statusId, file, onProgress) {
   return result.url;
 }
 
+// Catbox anonymous uploads cannot be deleted by the app without a Catbox userhash.
+// These no-op functions keep existing delete paths safe when a chat/status record is removed.
 export async function deleteChatImage() { return false; }
 export async function deleteStatusMedia() { return false; }
 
-// ---------------------------------------------------------------------------
-// Persistent media cache
-// ---------------------------------------------------------------------------
-// Android uses MediaCachePlugin, which streams the file to the app's private
-// files directory. The cache survives app/process restarts until the message
-// is deleted. A small in-flight map prevents the same URL from being fetched
-// several times when multiple listeners/components notice it at once.
-const inFlight = new Map();
-
-function cacheKey(url, kind) {
-  return `v1|${String(kind || 'media')}|${String(url || '').trim()}`;
-}
-
-function rememberedPathKey(url, kind) {
-  return `schoolChatMediaPath:${cacheKey(url, kind)}`;
-}
-
-export function rememberedCachedMediaSource(url, kind) {
-  try {
-    const path = localStorage.getItem(rememberedPathKey(url, kind));
-    return path ? Capacitor.convertFileSrc(path) : '';
-  } catch {
-    return '';
-  }
-}
-
-async function nativeCachedUrl(url, kind) {
-  if (!Capacitor.isNativePlatform() || !url) return '';
-  const remembered = rememberedCachedMediaSource(url, kind);
-  try {
-    const result = await MediaCache.get({ key: cacheKey(url, kind) });
-    if (result?.exists && result.path) {
-      try { localStorage.setItem(rememberedPathKey(url, kind), result.path); } catch {}
-      return Capacitor.convertFileSrc(result.path);
-    }
-  } catch {
-    // Use the remembered path only when the native lookup is unavailable.
-  }
-  return remembered;
-}
-
-export async function getCachedMediaSource(url, kind) {
-  return nativeCachedUrl(url, kind);
-}
-
-export async function ensureMediaCached(url, kind) {
-  const clean = String(url || '').trim();
-  if (!clean || (kind !== 'image' && kind !== 'video')) return '';
-  const cached = await nativeCachedUrl(clean, kind);
-  if (cached) return cached;
-  if (!Capacitor.isNativePlatform()) return clean;
-  if (inFlight.has(cacheKey(clean, kind))) return inFlight.get(cacheKey(clean, kind));
-
-  const key = cacheKey(clean, kind);
-  const job = MediaCache.cache({ url: clean, key })
-    .then(result => {
-      if (!result?.path) return '';
-      try { localStorage.setItem(rememberedPathKey(clean, kind), result.path); } catch {}
-      return Capacitor.convertFileSrc(result.path);
-    })
-    .catch(() => '')
-    .finally(() => inFlight.delete(key));
-  inFlight.set(key, job);
-  return job;
-}
-
-export async function deleteCachedMedia(url, kind) {
-  const clean = String(url || '').trim();
-  if (!clean) return;
-  try { localStorage.removeItem(rememberedPathKey(clean, kind)); } catch {}
-  if (!Capacitor.isNativePlatform()) return;
-  try { await MediaCache.remove({ key: cacheKey(clean, kind) }); } catch { /* best effort */ }
-}
+// ---- Automatic download of received media (WhatsApp-style) -------------------
+// As soon as an incoming image/video message is seen (chat open or not) the
+// file starts loading in the background, so tapping it later opens instantly
+// instead of starting a fresh download. Only runs while the phone is online.
+const prefetched = new Set();
+const keepAlive = [];
 
 export function prefetchMedia(url, kind) {
-  const clean = String(url || '').trim();
-  if (!clean || (kind !== 'image' && kind !== 'video')) return Promise.resolve('');
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve('');
-  return ensureMediaCached(clean, kind);
+  try {
+    if (!url || prefetched.has(url)) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    prefetched.add(url);
+    if (kind === 'image') {
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = url;
+      keepAlive.push(img);
+    } else if (kind === 'video') {
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+      video.playsInline = true;
+      video.src = `${url}#t=0.001`;
+      video.load();
+      keepAlive.push(video);
+    }
+    if (keepAlive.length > 40) {
+      const old = keepAlive.shift();
+      try { if (old.tagName === 'VIDEO') { old.removeAttribute('src'); old.load(); } else { old.src = ''; } } catch { /* ignore */ }
+    }
+  } catch { /* prefetch is best-effort only */ }
 }
 
+// Adds the media-fragment that makes the WebView paint the first frame of a
+// video instead of the generic grey "play" logo.
 export function videoFirstFrameSrc(url) {
   if (!url) return '';
   return url.includes('#') ? url : `${url}#t=0.001`;
+}
+
+// Downloads a Catbox file as bytes. On the phone this goes through the native
+// plugin (no browser CORS rules); in a browser it falls back to fetch().
+export async function downloadBytes(url) {
+  if (!String(url || '').startsWith('https://files.catbox.moe/')) throw new Error('Invalid file link.');
+  if (Capacitor.isNativePlatform()) {
+    const res = await CatboxUploader.download({ url });
+    const bin = atob(String(res?.data || ''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Download failed.');
+  return new Uint8Array(await r.arrayBuffer());
+}
+
+// Reads a File/Blob as raw bytes (used before locking it -- the plain bytes
+// never touch the network, only the AES-GCM ciphertext does).
+export async function fileToBytes(file) {
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+// Uploads already-encrypted bytes as an opaque .bin file. Catbox (and anyone
+// with the link) only ever sees ciphertext -- the real name/type live inside
+// the encrypted `lock` object attached to the message, not in this filename.
+export async function uploadEncryptedBytes(bytes, onProgress) {
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  const file = new File([blob], `locked-${Date.now()}.bin`, { type: 'application/octet-stream' });
+  return uploadFileToCatbox(file, onProgress);
 }

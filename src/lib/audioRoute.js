@@ -34,11 +34,3 @@ export async function clearAudioRoute() {
     // Older generated Android builds may not have the native clearRoute method.
   }
 }
-
-export async function startSystemRingtone() {
-  try { await AudioRouter.startRingtone(); } catch {}
-}
-
-export async function stopSystemRingtone() {
-  try { await AudioRouter.stopRingtone(); } catch {}
-}

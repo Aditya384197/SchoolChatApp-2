@@ -1,7 +1,6 @@
 import {
   increment,
   onValue,
-  get,
   push,
   ref,
   serverTimestamp,
@@ -12,16 +11,15 @@ import { db } from '../firebase';
 
 export const chatIdFor = (a, b) => [a, b].sort().join('_');
 
-export function listenMessages(chatId, callback, onError) {
+export function listenMessages(chatId, callback) {
   const r = ref(db, `chats/${chatId}/messages`);
   return onValue(r, (snap) => {
     const data = snap.val() || {};
     const list = Object.entries(data)
-      .filter(([, m]) => m && typeof m === 'object')
       .map(([id, m]) => ({ id, ...m }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     callback(list);
-  }, error => onError?.(error));
+  });
 }
 
 export function createMessageId(chatId) {
@@ -34,38 +32,34 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
   const imageUrl = options.imageUrl || '';
   const fileUrl = options.fileUrl || imageUrl || '';
   const attachmentType = type === 'image' || type === 'video' || type === 'file' ? type : (fileUrl ? 'image' : 'text');
-  if (!clean && !fileUrl) return null;
-  const participantsRef = ref(db, `chats/${chatId}/participants`);
-  const participantsSnap = await get(participantsRef);
-  if (!participantsSnap.exists()) {
-    await set(participantsRef, {
-      [senderId]: true,
-      [receiverId]: true
-    });
-  } else if (!participantsSnap.child(senderId).exists() || !participantsSnap.child(receiverId).exists()) {
-    throw new Error('Chat participants are invalid.');
-  }
+  if (type !== 'locked' && !clean && !fileUrl) return null;
+  if (type === 'locked' && !options.lock) return null;
+  await set(ref(db, `chats/${chatId}/participants`), {
+    [senderId]: true,
+    [receiverId]: true
+  });
 
   const messageId = options.messageId || createMessageId(chatId);
   const createdAt = serverTimestamp();
+  const locked = attachmentType === 'text' && options.type === 'locked';
   const msg = {
     senderId,
     receiverId,
-    text: clean,
-    type: attachmentType,
+    text: locked ? '' : clean,
+    type: locked ? 'locked' : attachmentType,
     ...(fileUrl ? { fileUrl } : {}),
-    ...(attachmentType === 'image' ? { imageUrl: fileUrl } : {}),
+    ...(attachmentType === 'image' && !locked ? { imageUrl: fileUrl } : {}),
     ...(options.fileName ? { fileName: options.fileName } : {}),
     ...(options.fileType ? { fileType: options.fileType } : {}),
     ...(options.fileSize ? { fileSize: Number(options.fileSize) } : {}),
-    ...(options.secureAttachment ? { secureAttachment: options.secureAttachment } : {}),
+    ...(options.lock ? { lock: options.lock } : {}),
     createdAt,
     delivered: false,
     deliveredAt: null,
     seen: false,
     seenAt: null
   };
-  const preview = options.secureAttachment ? '🔐 Locked attachment' : (clean || (attachmentType === 'image' ? '📷 Image' : attachmentType === 'video' ? '🎥 Video' : attachmentType === 'file' ? `📎 ${options.fileName || 'File'}` : ''));
+  const preview = locked ? '🔒 Locked message' : (clean || (attachmentType === 'image' ? '📷 Image' : attachmentType === 'video' ? '🎥 Video' : attachmentType === 'file' ? `📎 ${options.fileName || 'File'}` : ''));
 
   const writes = {
     [`chats/${chatId}/messages/${messageId}`]: msg,
