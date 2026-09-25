@@ -1,257 +1,89 @@
-name: Build School Chat APK
+name: Unzip and Flatten Project
 
+# Trigger: whenever a .zip file is pushed/uploaded to the repo root (also
+# runnable manually from the Actions tab via "Run workflow").
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    paths:
+      - '**.zip'
+  workflow_dispatch:
 
+# Needed so this workflow's own commit/push back to the repo is allowed.
 permissions:
-  contents: read
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  build:
+  unzip:
+    name: Extract uploaded zip into repo root
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Verify project layout
+      - name: Extract every zip at repo root and flatten into root
         run: |
-          for f in package.json capacitor.config.json index.html src/main.jsx public/school-chat-icon.png \
-                   native/AudioRouter/AudioRouterPlugin.java \
-                   native/CatboxUploader/CatboxUploaderPlugin.java \
-                   native/MediaCache/MediaCachePlugin.java \
-                   native/SystemBars/SystemBarsPlugin.java; do
-            if [ ! -f "$f" ]; then
-              echo "::error::Required file not found: $f"
-              exit 1
-            fi
-          done
-          echo "Repository layout OK."
+          set -e
+          shopt -s nullglob
 
-      # IMPORTANT: do not use `cache: npm` here. This repository deliberately
-      # has no package-lock.json, so setup-node's npm cache validation would
-      # stop the job before npm install even starts.
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
+          # Exact filename of the project zip you upload to repo root.
+          # If you upload a zip with a different name later, this still
+          # works — it's just checked first, then any other *.zip is
+          # picked up automatically below.
+          KNOWN_ZIP="ESP32-Flasher-PROJECT-NO-GITHUB-FOLDER.zip"
 
-      - name: Install npm dependencies
-        run: npm install --no-audit --no-fund --legacy-peer-deps
-
-      - name: Build web application
-        run: npm run build
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install image tooling
-        run: python -m pip install --disable-pip-version-check Pillow
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-
-      # Keep one stable debug key between Actions runs so the generated APK can
-      # be installed over the previous School Chat debug build.
-      - name: Restore stable debug signing key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: schoolchat-debug-keystore-v2
-
-      - name: Generate debug key if needed
-        run: |
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+          zips=(*.zip)
+          if [ -f "$KNOWN_ZIP" ]; then
+            echo "Found known zip: $KNOWN_ZIP"
           fi
 
-      - name: Add Android platform and sync Capacitor
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "No .zip file found at repo root. Nothing to do."
+            exit 0
+          fi
+
+          for zipfile in "${zips[@]}"; do
+            echo "=== Extracting: $zipfile ==="
+            tmpdir=$(mktemp -d)
+            unzip -o "$zipfile" -d "$tmpdir" > /dev/null
+
+            # If the zip has a single top-level wrapper folder (common with
+            # GitHub-style "project-main/" exports), descend into it so its
+            # *contents* land at repo root instead of the wrapper itself.
+            src="$tmpdir"
+            entries=("$tmpdir"/*)
+            if [ ${#entries[@]} -eq 1 ] && [ -d "${entries[0]}" ]; then
+              src="${entries[0]}"
+              echo "Detected single wrapper folder: $(basename "$src")"
+            fi
+
+            # Copy everything into repo root EXCEPT .github — the default
+            # GITHUB_TOKEN this workflow runs with is never allowed to
+            # create/modify files under .github/workflows/, and a push that
+            # tries to will simply fail. Add/update workflow files manually
+            # instead (GitHub web UI: Add file > Create new file).
+            find "$src" -mindepth 1 -maxdepth 1 ! -name '.github' -exec cp -a -t . {} +
+
+            rm -rf "$tmpdir"
+            git rm -f "$zipfile" > /dev/null
+            echo "=== Done: $zipfile ==="
+          done
+
+      - name: Commit and push extracted files
         run: |
-          npx cap add android
-          npx cap sync android
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Configure native Android plugins and true edge-to-edge window
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
+          # Belt-and-braces: never stage anything under .github, even if it
+          # somehow ended up on disk (e.g. a leftover from a previous run).
+          git add -A -- . ':!.github'
 
-          pkg = Path('android/app/src/main/java/com/aditya/schoolchat')
-          pkg.mkdir(parents=True, exist_ok=True)
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+            exit 0
+          fi
 
-          for src in (
-              'native/AudioRouter/AudioRouterPlugin.java',
-              'native/CatboxUploader/CatboxUploaderPlugin.java',
-              'native/MediaCache/MediaCachePlugin.java',
-              'native/SystemBars/SystemBarsPlugin.java',
-          ):
-              destination = pkg / Path(src).name
-              destination.write_text(Path(src).read_text(encoding='utf-8'), encoding='utf-8')
-
-          # Draw the WebView underneath BOTH system bars. The bars themselves
-          # remain visible; they become transparent overlays on the same app
-          # surface instead of separate black/white regions.
-          main = '''package com.aditya.schoolchat;\n\nimport android.os.Bundle;\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(Bundle savedInstanceState) {\n        // Register before BridgeActivity builds the Capacitor bridge.\n        registerPlugin(AudioRouterPlugin.class);\n        registerPlugin(CatboxUploaderPlugin.class);\n        registerPlugin(MediaCachePlugin.class);\n        registerPlugin(SystemBarsPlugin.class);\n\n        super.onCreate(savedInstanceState);\n\n        // BridgeActivity can adjust the window during super.onCreate().\n        // Apply edge-to-edge LAST so Android does not restore separate opaque\n        // status/navigation regions after the app has started.\n        SystemBarsPlugin.apply(getWindow(), false);\n    }\n}\n'''
-          (pkg / 'MainActivity.java').write_text(main, encoding='utf-8')
-
-          # Remove any startup-time opaque system-bar colors from the generated
-          # Capacitor theme. The JS/native code later changes only icon contrast.
-          for theme_file in list(Path('android/app/src/main/res').glob('values*/styles.xml')) + list(Path('android/app/src/main/res').glob('values*/themes.xml')):
-              theme_text = theme_file.read_text(encoding='utf-8')
-              if 'name=\"AppTheme\"' not in theme_text:
-                  continue
-
-              def set_item(text, name, value):
-                  pattern = rf'<item\s+name=\"android:{re.escape(name)}\">.*?</item>'
-                  replacement = f'<item name=\"android:{name}\">{value}</item>'
-                  if re.search(pattern, text, flags=re.S):
-                      return re.sub(pattern, replacement, text, count=1, flags=re.S)
-                  return text.replace('</style>', f'        {replacement}\n    </style>', 1)
-
-              theme_text = set_item(theme_text, 'windowDrawsSystemBarBackgrounds', 'true')
-              theme_text = set_item(theme_text, 'statusBarColor', '@android:color/transparent')
-              theme_text = set_item(theme_text, 'navigationBarColor', '@android:color/transparent')
-              theme_text = set_item(theme_text, 'navigationBarDividerColor', '@android:color/transparent')
-              theme_file.write_text(theme_text, encoding='utf-8')
-              print(f'Patched edge-to-edge AppTheme: {theme_file}')
-              break
-
-          print('Native plugins and edge-to-edge MainActivity prepared.')
-          PY
-
-      - name: Grant Android permissions
-        run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-
-          manifest = Path('android/app/src/main/AndroidManifest.xml')
-          text = manifest.read_text(encoding='utf-8')
-          permissions = [
-              ('INTERNET', ''),
-              ('CAMERA', ''),
-              ('RECORD_AUDIO', ''),
-              ('MODIFY_AUDIO_SETTINGS', ''),
-              ('BLUETOOTH_CONNECT', ''),
-              ('BLUETOOTH_SCAN', ' android:usesPermissionFlags="neverForLocation"'),
-              ('POST_NOTIFICATIONS', ''),
-          ]
-          for name, extra in permissions:
-              pattern = r'android:name="android\.permission\.' + name + r'"'
-              if re.search(pattern, text):
-                  continue
-              line = f'    <uses-permission android:name="android.permission.{name}"{extra} />\n'
-              text = text.replace('<application', line + '    <application', 1)
-          manifest.write_text(text, encoding='utf-8')
-          print('Manifest permissions prepared.')
-          PY
-
-      - name: Apply launcher icons
-        run: |
-          python - <<'PY'
-          from PIL import Image
-          from pathlib import Path
-
-          res = Path('android/app/src/main/res')
-          src = Image.open('public/school-chat-icon.png').convert('RGBA')
-          sizes = {
-              'mipmap-mdpi': 48, 'mipmap-hdpi': 72, 'mipmap-xhdpi': 96,
-              'mipmap-xxhdpi': 144, 'mipmap-xxxhdpi': 192,
-          }
-          for folder, size in sizes.items():
-              out = res / folder
-              out.mkdir(parents=True, exist_ok=True)
-              icon = src.resize((size, size), Image.Resampling.LANCZOS)
-              icon.save(out / 'ic_launcher.png')
-              icon.save(out / 'ic_launcher_round.png')
-
-          fg_sizes = {
-              'mipmap-mdpi': 108, 'mipmap-hdpi': 162, 'mipmap-xhdpi': 216,
-              'mipmap-xxhdpi': 324, 'mipmap-xxxhdpi': 432,
-          }
-          for folder, canvas in fg_sizes.items():
-              out = res / folder
-              out.mkdir(parents=True, exist_ok=True)
-              inner = int(canvas * 0.66)
-              icon = src.resize((inner, inner), Image.Resampling.LANCZOS)
-              fg = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
-              fg.paste(icon, ((canvas - inner) // 2, (canvas - inner) // 2), icon)
-              fg.save(out / 'ic_launcher_foreground.png')
-
-          values = res / 'values'
-          values.mkdir(parents=True, exist_ok=True)
-          (values / 'ic_launcher_background.xml').write_text(
-              '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
-              '    <color name="ic_launcher_background">#0f6fe8</color>\n'
-              '</resources>\n', encoding='utf-8')
-          anydpi = res / 'mipmap-anydpi-v26'
-          anydpi.mkdir(parents=True, exist_ok=True)
-          adaptive = (
-              '<?xml version="1.0" encoding="utf-8"?>\n'
-              '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
-              '    <background android:drawable="@color/ic_launcher_background"/>\n'
-              '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n'
-              '</adaptive-icon>\n'
-          )
-          (anydpi / 'ic_launcher.xml').write_text(adaptive, encoding='utf-8')
-          (anydpi / 'ic_launcher_round.xml').write_text(adaptive, encoding='utf-8')
-          PY
-
-      - name: Generate native splash image
-        run: |
-          python - <<'PY'
-          from PIL import Image
-          from pathlib import Path
-
-          res = Path('android/app/src/main/res')
-          icon = Image.open('public/school-chat-icon.png').convert('RGBA')
-          size = 1200
-          bg = Image.new('RGBA', (size, size), (15, 111, 232, 255))
-          icon_size = int(size * 0.42)
-          small = icon.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
-          bg.paste(small, ((size - icon_size) // 2, (size - icon_size) // 2), small)
-          for folder in ('drawable', 'drawable-night'):
-              out = res / folder
-              out.mkdir(parents=True, exist_ok=True)
-              bg.convert('RGB').save(out / 'splash.png')
-          PY
-
-      - name: Verify Android web assets
-        run: |
-          test -f android/app/src/main/assets/public/index.html || \
-            { echo "::error::Capacitor web assets were not copied into Android."; exit 1; }
-          echo "Android web assets OK."
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
-
-      - name: Build debug APK
-        working-directory: android
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: school-chat-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          git commit -m "Auto-extract uploaded project zip"
+          git push
