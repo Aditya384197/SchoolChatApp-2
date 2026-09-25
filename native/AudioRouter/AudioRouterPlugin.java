@@ -3,7 +3,11 @@ package com.aditya.schoolchat;
 import android.content.Context;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.media.AudioAttributes;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.os.Build;
+import android.net.Uri;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -15,6 +19,48 @@ import java.util.List;
 
 @CapacitorPlugin(name = "AudioRouter")
 public class AudioRouterPlugin extends Plugin {
+    private static Ringtone activeRingtone;
+
+    @PluginMethod
+    public void startRingtone(PluginCall call) {
+        try {
+            stopRingtoneInternal();
+            Context context = getContext();
+            Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            Ringtone ringtone = uri == null ? null : RingtoneManager.getRingtone(context, uri);
+            if (ringtone == null) {
+                call.resolve();
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                ringtone.setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+            }
+            activeRingtone = ringtone;
+            ringtone.play();
+            call.resolve();
+        } catch (Exception e) {
+            call.resolve();
+        }
+    }
+
+    @PluginMethod
+    public void stopRingtone(PluginCall call) {
+        stopRingtoneInternal();
+        call.resolve();
+    }
+
+    private static synchronized void stopRingtoneInternal() {
+        try {
+            if (activeRingtone != null && activeRingtone.isPlaying()) activeRingtone.stop();
+        } catch (Exception ignored) {
+        } finally {
+            activeRingtone = null;
+        }
+    }
+
     private AudioManager audioManager() {
         return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
     }

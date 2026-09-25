@@ -75,17 +75,35 @@ public class MediaCachePlugin extends Plugin {
             }
 
             URL url = new URL(source);
-            connection = (HttpURLConnection) url.openConnection();
-            connection.setInstanceFollowRedirects(false);
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(15_000);
-            connection.setReadTimeout(60_000);
-            connection.setUseCaches(true);
-            connection.setRequestProperty("User-Agent", "SchoolChat/1.6.3");
-            connection.connect();
+            int code = -1;
+            for (int redirects = 0; redirects <= 3; redirects++) {
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setInstanceFollowRedirects(false);
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(15_000);
+                connection.setReadTimeout(60_000);
+                connection.setUseCaches(true);
+                connection.setRequestProperty("User-Agent", "SchoolChat/1.6.6");
+                connection.connect();
+                code = connection.getResponseCode();
+                if (code >= 200 && code < 300) break;
 
-            int code = connection.getResponseCode();
-            if (code < 200 || code >= 300) throw new IOException("Media download failed (HTTP " + code + ").");
+                if (code == HttpURLConnection.HTTP_MOVED_PERM
+                        || code == HttpURLConnection.HTTP_MOVED_TEMP
+                        || code == HttpURLConnection.HTTP_SEE_OTHER
+                        || code == 307 || code == 308) {
+                    String location = connection.getHeaderField("Location");
+                    connection.disconnect();
+                    if (location == null || location.trim().isEmpty()) throw new IOException("Media redirect had no destination.");
+                    URL next = new URL(url, location);
+                    if (!isAllowedUrl(next.toString())) throw new IOException("Media redirect points outside the Catbox host.");
+                    url = next;
+                    continue;
+                }
+                throw new IOException("Media download failed (HTTP " + code + ").");
+            }
+            if (code < 200 || code >= 300) throw new IOException("Too many media redirects.");
+
             long declared = connection.getContentLengthLong();
             if (declared > MAX_BYTES) throw new IOException("Media is larger than 15 MB.");
 

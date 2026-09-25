@@ -12,15 +12,16 @@ import { db } from '../firebase';
 
 export const chatIdFor = (a, b) => [a, b].sort().join('_');
 
-export function listenMessages(chatId, callback) {
+export function listenMessages(chatId, callback, onError) {
   const r = ref(db, `chats/${chatId}/messages`);
   return onValue(r, (snap) => {
     const data = snap.val() || {};
     const list = Object.entries(data)
+      .filter(([, m]) => m && typeof m === 'object')
       .map(([id, m]) => ({ id, ...m }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     callback(list);
-  });
+  }, error => onError?.(error));
 }
 
 export function createMessageId(chatId) {

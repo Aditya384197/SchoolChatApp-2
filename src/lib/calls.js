@@ -1,10 +1,14 @@
 import React from 'react';
-import { onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
+import { get, onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
 import { db } from '../firebase';
 import { chatIdFor } from './chat';
 import { clearAudioRoute } from './audioRoute';
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+];
 const CALL_RING_TIMEOUT_MS = 30 * 1000;
 const DISCONNECT_GRACE_MS = 8 * 1000;
 
@@ -175,7 +179,7 @@ export function useVoiceCall({ uid, users }) {
 
   async function createPeer(callId, remoteUid, role) {
     const stream = await getMicrophoneStream();
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 8 });
 
     stream.getTracks().forEach(track => pc.addTrack(track, stream));
     pc.ontrack = event => {
@@ -223,6 +227,27 @@ export function useVoiceCall({ uid, users }) {
     setCallError('');
     const callId = chatIdFor(uid, peer.uid);
     try {
+      // The app historically uses one deterministic call room per pair. If
+      // Android was killed during a previous call, that room can be left
+      // behind and reject a new create. Recover only stale ended/ringing
+      // records; never overwrite a genuinely active call.
+      try {
+        const existing = await get(ref(db, `calls/${callId}`));
+        const old = existing.val();
+        if (old) {
+          const age = Date.now() - Number(old.createdAt || 0);
+          if (old.status === 'ended' || (old.status === 'ringing' && age > (CALL_RING_TIMEOUT_MS + DISCONNECT_GRACE_MS))) {
+            await remove(ref(db, `calls/${callId}`));
+          } else {
+            throw new Error('This call is already in progress.');
+          }
+        }
+      } catch (checkError) {
+        // A brand-new call room is intentionally unreadable until it contains
+        // participants; a permission failure here is therefore safe to ignore.
+        if (checkError?.message === 'This call is already in progress.') throw checkError;
+      }
+
       const pc = await createPeer(callId, peer.uid, 'caller');
       // Create the parent call record BEFORE setLocalDescription() starts ICE
       // gathering. Otherwise an early candidate can hit RTDB before the

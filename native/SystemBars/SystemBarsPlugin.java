@@ -5,6 +5,10 @@ import android.os.Build;
 import android.view.View;
 import android.view.Window;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
@@ -17,6 +21,36 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 /** Android-10-safe system-bar appearance helper. */
 @CapacitorPlugin(name = "SystemBars")
 public class SystemBarsPlugin extends Plugin {
+    @PluginMethod
+    public void getInsets(PluginCall call) {
+        try {
+            View decor = getActivity().getWindow().getDecorView();
+            WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(decor);
+            Insets bars = insets == null
+                    ? Insets.NONE
+                    : insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            Insets ime = insets == null
+                    ? Insets.NONE
+                    : insets.getInsets(WindowInsetsCompat.Type.ime());
+
+            JSObject result = new JSObject();
+            result.put("top", bars.top);
+            result.put("bottom", bars.bottom);
+            result.put("left", bars.left);
+            result.put("right", bars.right);
+            result.put("imeBottom", ime.bottom);
+            call.resolve(result);
+        } catch (Exception e) {
+            JSObject result = new JSObject();
+            result.put("top", 0);
+            result.put("bottom", 0);
+            result.put("left", 0);
+            result.put("right", 0);
+            result.put("imeBottom", 0);
+            call.resolve(result);
+        }
+    }
+
     @PluginMethod
     public void setAppearance(PluginCall call) {
         boolean dark = call.getBoolean("dark", false);

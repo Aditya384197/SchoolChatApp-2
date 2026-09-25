@@ -32,7 +32,7 @@ import { useBackHandler } from './lib/backStack';
 import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 import { useVoiceCall } from './lib/calls';
-import { getAudioRoutes, setAudioRoute } from './lib/audioRoute';
+import { getAudioRoutes, setAudioRoute, startSystemRingtone, stopSystemRingtone } from './lib/audioRoute';
 import { ensureIdentityKey, protectIdentityWithPin, disableIdentityProtection, getPersonalSecureKey, decryptLockedAttachment, prepareLockedAttachment } from './lib/secureFiles';
 
 function formatLastSeen(ts, t, lang) {
@@ -453,6 +453,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   const { t, lang } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
+  const [messagesReady, setMessagesReady] = useState(false);
+  const [messageLoadError, setMessageLoadError] = useState('');
   const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -486,20 +488,32 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   function clearSelection() { setSelectedIds(new Set()); }
   useBackHandler(selectionMode ? clearSelection : onBack);
 
-  useEffect(() => listenMessages(chatId, setMessages), [chatId]);
+  useEffect(() => {
+    setMessagesReady(false);
+    setMessageLoadError('');
+    return listenMessages(chatId, list => {
+      setMessages(list);
+      setMessagesReady(true);
+    }, error => {
+      setMessagesReady(true);
+      setMessageLoadError(error?.message || 'Messages could not be loaded.');
+    });
+  }, [chatId]);
   useEffect(() => listenHidden(me.uid, chatId, setHidden), [chatId, me.uid]);
   useEffect(() => listenTyping(chatId, setTypingUsers), [chatId]);
+  const nearBottomRef = useRef(true);
+  const firstMessagePaintRef = useRef(true);
   useEffect(() => {
-    let active = true;
     messages.forEach(m => {
       if (m.receiverId === me.uid && !m.delivered) markDelivered(chatId, m.id).catch(() => {});
     });
-    const incoming = messages.filter(m => m.receiverId === me.uid);
-    const latest = incoming[incoming.length - 1];
-    if (active && latest && listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+    const latest = messages[messages.length - 1];
+    if (latest && listRef.current && (firstMessagePaintRef.current || nearBottomRef.current)) {
+      requestAnimationFrame(() => {
+        if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+      });
     }
-    return () => { active = false; };
+    firstMessagePaintRef.current = false;
   }, [messages, me.uid, chatId]);
 
   // Received photos/videos start downloading the moment they arrive (like
@@ -620,7 +634,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
   }
 
   const visibleMessages = messages.filter(m => !hidden[m.id]);
-  function handleScroll(){const el=listRef.current;if(!el)return;setNearBottom(el.scrollHeight-el.scrollTop-el.clientHeight<80);const nodes=[...el.querySelectorAll('[data-message-date]')];let cur='';for(const n of nodes){if(n.offsetTop-el.scrollTop<=90)cur=n.dataset.messageDate||cur;else break}if(cur)setActiveDate(new Date(cur).toLocaleDateString(localeFor(lang),{day:'numeric',month:'long',year:'numeric'}));}
+  function handleScroll(){const el=listRef.current;if(!el)return;const close=el.scrollHeight-el.scrollTop-el.clientHeight<80;nearBottomRef.current=close;setNearBottom(close);const nodes=[...el.querySelectorAll('[data-message-date]')];let cur='';for(const n of nodes){if(n.offsetTop-el.scrollTop<=90)cur=n.dataset.messageDate||cur;else break}if(cur)setActiveDate(new Date(cur).toLocaleDateString(localeFor(lang),{day:'numeric',month:'long',year:'numeric'}));}
   function scrollBottom(){listRef.current?.scrollTo({top:listRef.current.scrollHeight,behavior:'smooth'});}
   const selectedMsgs = visibleMessages.filter(m => selectedIds.has(m.id));
   const allSelected = visibleMessages.length > 0 && selectedIds.size === visibleMessages.length;
@@ -725,6 +739,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       )}
       <div className="messages" ref={listRef} onScroll={handleScroll}>
         {activeDate&&<div className="chat-date-chip">{activeDate}</div>}
+        {!messagesReady && visibleMessages.length === 0 && <div className="messages-loading"><span className="media-spinner inline" /> <span>{t('loadingMessages') || 'Loading messages…'}</span></div>}
+        {messageLoadError && visibleMessages.length === 0 && <div className="messages-load-error">{messageLoadError}</div>}
         {visibleMessages.map(m => (
           <MessageBubble
             key={m.id} me={me} message={m}
@@ -751,7 +767,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
       )}
       <form className="composer" onSubmit={submit}>
         <button type="button" className="icon attach-btn" onClick={() => setImageSourceOpen(true)} title="Attach" disabled={sending}><ImagePlus size={21} /></button>
-        <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} placeholder={t('messagePlaceholder')} />
+        <input ref={inputRef} value={text} onChange={e => handleTyping(e.target.value)} onFocus={() => window.setTimeout(() => inputRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }), 160)} placeholder={t('messagePlaceholder')} />
         <button className="send" disabled={sending} onMouseDown={e => e.preventDefault()}><Send size={20} /></button>
       </form>
       <input ref={galleryRef} type="file" hidden accept="image/*,video/*" onChange={pickChatAttachment}/><input ref={cameraRef} type="file" hidden accept="image/*" capture="environment" onChange={pickChatAttachment}/><input ref={fileInputRef} type="file" hidden accept="image/*,video/*,application/pdf,application/octet-stream,.pdf,.bin" onChange={pickChatAttachment}/>
@@ -869,19 +885,8 @@ function IncomingVoiceCall({ call, onAccept, onDecline }) {
   const { t } = usePrefs();
   const peer = call.peer || { uid: call.callerId, name: 'School Chat' };
   useEffect(() => {
-    let ctx; let timer; let stopped = false;
-    const beep = () => {
-      try {
-        ctx ||= new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator(); const gain = ctx.createGain();
-        osc.frequency.value = 880; gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
-        osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.3);
-      } catch {}
-    };
-    beep(); timer = setInterval(() => { if (!stopped) beep(); }, 1200);
-    return () => { stopped = true; clearInterval(timer); try { ctx?.close(); } catch {} };
+    startSystemRingtone();
+    return () => { stopSystemRingtone(); };
   }, []);
   return (
     <div className="voice-overlay call2">
@@ -918,6 +923,14 @@ function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) 
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - call.startedAt) / 1000)), 1000);
     return () => clearInterval(id);
   }, [call.startedAt]);
+  useEffect(() => {
+    if (call.status === 'ringing') {
+      startSystemRingtone();
+      return () => { stopSystemRingtone(); };
+    }
+    stopSystemRingtone();
+    return undefined;
+  }, [call.status]);
   useEffect(() => {
     let live = true;
     const refresh = () => getAudioRoutes().then(value => {
@@ -985,7 +998,7 @@ function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) 
             <small>{muted ? t('unmute') : t('mute')}</small>
           </div>
           <div className="call2-act">
-            <button className="call2-btn end" onClick={onHangUp}><PhoneOff size={28} /></button>
+            <button className="call2-btn end" onClick={onHangUp}><Phone size={27} style={{ transform: 'rotate(135deg)' }} /></button>
             <small>{t('endCall')}</small>
           </div>
         </div>
