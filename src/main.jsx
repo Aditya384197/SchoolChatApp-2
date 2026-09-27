@@ -40,6 +40,26 @@ if (typeof window !== 'undefined') {
   window.addEventListener('resize', sync, { passive: true });
   window.addEventListener('orientationchange', sync, { passive: true });
   window.visualViewport?.addEventListener('resize', sync, { passive: true });
+  window.visualViewport?.addEventListener('scroll', sync, { passive: true });
+  // In edge-to-edge mode, opening/closing the keyboard doesn't reliably fire
+  // a plain `resize` event on every Android/WebView combination, and it can
+  // fire late. Focus/blur on any text field is a far more deterministic
+  // signal that the keyboard is about to show or hide, so resync repeatedly
+  // right around that moment too (covers both the fast and the slow cases).
+  const onFocusChange = () => { sync(); [30, 80, 150, 250, 400, 600].forEach(ms => window.setTimeout(sync, ms)); };
+  document.addEventListener('focusin', onFocusChange, true);
+  document.addEventListener('focusout', onFocusChange, true);
+  // Belt-and-suspenders: while a text field is focused, also poll briefly --
+  // some keyboards animate open/closed over ~300-400ms, and a single
+  // snapshot can land mid-animation and undershoot the real height.
+  let pollTimer = null;
+  document.addEventListener('focusin', e => {
+    if (!/^(INPUT|TEXTAREA)$/.test(e.target?.tagName || '')) return;
+    clearInterval(pollTimer);
+    let ticks = 0;
+    pollTimer = window.setInterval(() => { sync(); if (++ticks > 10) clearInterval(pollTimer); }, 80);
+  }, true);
+  document.addEventListener('focusout', () => { clearInterval(pollTimer); }, true);
   sync();
   window.setTimeout(sync, 120);
   window.setTimeout(sync, 450);

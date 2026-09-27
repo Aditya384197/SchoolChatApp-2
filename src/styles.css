@@ -738,3 +738,24 @@ body { overflow:hidden; }
 @media (max-width:600px) {
   .screen { max-width:none; }
 }
+
+/* =====================================================================
+   v1.8: keyboard/composer follow-up, Attach-file sheet dark contrast,
+   Settings header spacing.
+   ===================================================================== */
+
+/* Settings drawer sat right under the (now transparent) status bar, so the
+   "Settings" title rendered half-hidden near the very top. Give the drawer
+   real top clearance, and put visible air between the title strip and the
+   first option row. */
+.drawer { padding-top: calc(18px + var(--sc-system-top, env(safe-area-inset-top, 0px))); }
+.panel-header { padding: 6px 0 14px; min-height: 34px; }
+.settings-main-content { margin-top: 8px; }
+
+/* The "Attach file" sheet (.source-card) got a dark background + light text
+   in dark mode, but its buttons kept their own light background, and text
+   color is set only on the card -- the buttons never got their own dark
+   styling, so icon/label contrast collapsed to almost nothing. */
+:root[data-theme="dark"] .source-card button { background: #1e293b; color: #e2e8f0; }
+:root[data-theme="dark"] .source-card button:active { background: #26344a; }
+:root[data-theme="dark"] .source-card .cancel { background: #111a2e; color: #e2e8f0; }
