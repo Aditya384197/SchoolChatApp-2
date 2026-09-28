@@ -18,7 +18,14 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Locale;
 
-/** Persistent per-install media cache for HTTPS Catbox media. */
+/**
+ * Persistent per-install media cache.
+ *
+ * Files are stored under the app's internal files directory, so they survive
+ * process death/app restarts and are not world-readable. Only HTTPS Catbox
+ * media URLs are accepted; this prevents a chat message from turning the
+ * plugin into a general-purpose HTTP/localhost downloader.
+ */
 @CapacitorPlugin(name = "MediaCache")
 public class MediaCachePlugin extends Plugin {
     private static final String HOST = "files.catbox.moe";
@@ -27,9 +34,7 @@ public class MediaCachePlugin extends Plugin {
 
     private File cacheDir() {
         File dir = new File(getContext().getFilesDir(), "school-chat-media-v1");
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new IllegalStateException("Media cache directory could not be created.");
-        }
+        if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("Media cache directory could not be created.");
         return dir;
     }
 
@@ -40,12 +45,10 @@ public class MediaCachePlugin extends Plugin {
             call.reject("Media cache key is missing.");
             return;
         }
-        File target = findCachedFile(cacheDir(), digest(key));
+        File target = new File(cacheDir(), digest(key));
         JSObject result = new JSObject();
-        result.put("exists", target != null && target.isFile() && target.length() > 0);
-        if (target != null && target.isFile() && target.length() > 0) {
-            result.put("path", target.getAbsolutePath());
-        }
+        result.put("exists", target.isFile() && target.length() > 0);
+        if (target.isFile() && target.length() > 0) result.put("path", target.getAbsolutePath());
         call.resolve(result);
     }
 
@@ -65,11 +68,9 @@ public class MediaCachePlugin extends Plugin {
         HttpURLConnection connection = null;
         File temp = null;
         try {
-            File dir = cacheDir();
-            String digest = digest(key);
-            File existing = findCachedFile(dir, digest);
-            if (existing != null) {
-                resolvePath(call, existing);
+            File target = new File(cacheDir(), digest(key));
+            if (target.isFile() && target.length() > 0) {
+                resolvePath(call, target);
                 return;
             }
 
@@ -93,13 +94,9 @@ public class MediaCachePlugin extends Plugin {
                         || code == 307 || code == 308) {
                     String location = connection.getHeaderField("Location");
                     connection.disconnect();
-                    if (location == null || location.trim().isEmpty()) {
-                        throw new IOException("Media redirect had no destination.");
-                    }
+                    if (location == null || location.trim().isEmpty()) throw new IOException("Media redirect had no destination.");
                     URL next = new URL(url, location);
-                    if (!isAllowedUrl(next.toString())) {
-                        throw new IOException("Media redirect points outside the Catbox host.");
-                    }
+                    if (!isAllowedUrl(next.toString())) throw new IOException("Media redirect points outside the Catbox host.");
                     url = next;
                     continue;
                 }
@@ -110,21 +107,7 @@ public class MediaCachePlugin extends Plugin {
             long declared = connection.getContentLengthLong();
             if (declared > MAX_BYTES) throw new IOException("Media is larger than 15 MB.");
 
-            // Keep the real extension so Capacitor's local-file handler can
-            // infer a useful MIME type when the WebView renders the cached file.
-            String extension = extensionFromUrl(url.toString());
-            File target = new File(dir, digest + extension);
-            File legacy = new File(dir, digest);
-            if (target.isFile() && target.length() > 0) {
-                resolvePath(call, target);
-                return;
-            }
-            if (legacy.isFile() && legacy.length() > 0) {
-                resolvePath(call, legacy);
-                return;
-            }
-
-            temp = new File(dir, digest + ".part");
+            temp = new File(cacheDir(), digest(key) + ".part");
             long total = 0;
             try (InputStream raw = new BufferedInputStream(connection.getInputStream(), BUFFER);
                  BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(temp), BUFFER)) {
@@ -160,14 +143,10 @@ public class MediaCachePlugin extends Plugin {
     public void remove(PluginCall call) {
         String key = call.getString("key", "").trim();
         if (key.isEmpty()) { call.resolve(); return; }
-        File dir = cacheDir();
-        String prefix = digest(key);
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.isFile() && file.getName().startsWith(prefix)) file.delete();
-            }
-        }
+        File target = new File(cacheDir(), digest(key));
+        File part = new File(cacheDir(), digest(key) + ".part");
+        target.delete();
+        part.delete();
         call.resolve();
     }
 
@@ -179,38 +158,11 @@ public class MediaCachePlugin extends Plugin {
         call.resolve();
     }
 
-    private File findCachedFile(File dir, String digest) {
-        File[] files = dir.listFiles();
-        if (files == null) return null;
-        // Prefer an extension-bearing entry over the legacy extensionless file.
-        File legacy = null;
-        for (File file : files) {
-            if (!file.isFile() || !file.getName().startsWith(digest) || file.length() <= 0) continue;
-            if (file.getName().equals(digest)) legacy = file;
-            else if (!file.getName().endsWith(".part")) return file;
-        }
-        return legacy;
-    }
-
     private void resolvePath(PluginCall call, File file) {
         JSObject result = new JSObject();
         result.put("exists", true);
         result.put("path", file.getAbsolutePath());
         call.resolve(result);
-    }
-
-    private static String extensionFromUrl(String raw) {
-        try {
-            String path = new URL(raw).getPath();
-            int slash = path.lastIndexOf('/');
-            String name = slash >= 0 ? path.substring(slash + 1) : path;
-            int dot = name.lastIndexOf('.');
-            if (dot > 0 && dot < name.length() - 1) {
-                String ext = name.substring(dot).toLowerCase(Locale.US);
-                if (ext.matches("\\.[a-z0-9]{1,5}")) return ext;
-            }
-        } catch (Exception ignored) {}
-        return ".bin";
     }
 
     private static boolean isAllowedUrl(String raw) {

@@ -9,6 +9,15 @@ export async function prepareNotifications() {
       const requested = await LocalNotifications.requestPermissions();
       if (requested.display !== 'granted') return false;
     }
+    await LocalNotifications.createChannel({
+      id: 'school_chat_messages',
+      name: 'School Chat messages',
+      description: 'New messages and call alerts',
+      importance: 5,
+      visibility: 1,
+      sound: 'default',
+      vibration: true,
+    }).catch(() => {});
     await LocalNotifications.registerActionTypes({ types: [{
       id: 'SCHOOL_CHAT_MESSAGE',
       actions: [
@@ -34,7 +43,10 @@ export async function showMessageNotification({ title, body, id = Date.now(), ex
         body,
         schedule: { at: new Date(Date.now() + 50) },
         extra,
-        actionTypeId: 'SCHOOL_CHAT_MESSAGE'
+        channelId: 'school_chat_messages',
+        actionTypeId: 'SCHOOL_CHAT_MESSAGE',
+        sound: 'default',
+        autoCancel: true,
       }]
     });
   } catch {

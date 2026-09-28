@@ -36,14 +36,10 @@ export async function clearAudioRoute() {
 }
 
 
-export async function startRingtone() {
-  try {
-    await AudioRouter.startRingtone();
-  } catch {}
+export async function startRinging() {
+  try { await AudioRouter.startRinging(); } catch {}
 }
 
-export async function stopRingtone() {
-  try {
-    await AudioRouter.stopRingtone();
-  } catch {}
+export async function stopRinging() {
+  try { await AudioRouter.stopRinging(); } catch {}
 }

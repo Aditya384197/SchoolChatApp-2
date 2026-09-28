@@ -30,12 +30,9 @@ export function listenMessages(chatId, callback, onError) {
   });
 }
 
-export async function ensureChatParticipants(chatId, senderId, receiverId) {
-  if (!chatId || !senderId || !receiverId || senderId === receiverId) return;
-  await update(ref(db, `chats/${chatId}/participants`), {
-    [senderId]: true,
-    [receiverId]: true,
-  });
+export async function ensureChatParticipants(chatId, uid, otherUid) {
+  if (!uid || !otherUid || uid === otherUid) return;
+  await update(ref(db, `chats/${chatId}/participants`), { [uid]: true, [otherUid]: true });
 }
 
 export function createMessageId(chatId) {

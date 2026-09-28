@@ -21,7 +21,7 @@ import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification, listenNotificationActions } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
 import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
-import { usePrefs, localeFor, LANGUAGES, backgroundPatternStyle } from './context/Prefs';
+import { usePrefs, localeFor, LANGUAGES } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus, listenActiveStatusOwners, listenStatus, MAX_ACTIVE_STATUS } from './lib/status';
 import { MediaViewer, ChatImage, VideoThumb } from './components/MediaViewer';
@@ -35,6 +35,7 @@ import { initNativeBack, setExitWarningHandler } from './lib/nativeBack';
 import { APP_VERSION, UPDATE_URL } from './appMeta';
 import { useVoiceCall } from './lib/calls';
 import { getAudioRoutes, setAudioRoute } from './lib/audioRoute';
+import { getAdminCode, setAdminCode, validateAdminCode } from './lib/adminCode';
 
 function formatLastSeen(ts, t, lang) {
   const unavailable = `${t('lastSeen')} ${t('notAvailable')}`;
@@ -361,8 +362,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
   const { t, lang, background } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
-  const [messagesLoading, setMessagesLoading] = useState(true);
-  const [messagesLoadError, setMessagesLoadError] = useState('');
+  const [messagesError, setMessagesError] = useState('');
   const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -394,34 +394,16 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
   function clearSelection() { setSelectedIds(new Set()); }
   useBackHandler(selectionMode ? clearSelection : onBack);
 
+  const messagesReadyRef = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-    let stop = null;
-    setMessages([]);
-    setMessagesLoading(true);
-    setMessagesLoadError('');
-
-    (async () => {
-      try {
-        // A brand-new direct chat has no participant record yet. Create it
-        // before attaching the message listener; otherwise Firebase rules
-        // correctly reject the read and the chat can look permanently empty.
-        await ensureChatParticipants(chatId, me.uid, user.uid);
-        if (cancelled) return;
-        stop = listenMessages(
-          chatId,
-          list => { if (!cancelled) { setMessages(list); setMessagesLoading(false); setMessagesLoadError(''); } },
-          () => { if (!cancelled) { setMessagesLoading(false); setMessagesLoadError(t('chatLoadError')); } }
-        );
-      } catch (error) {
-        if (!cancelled) {
-          setMessagesLoading(false);
-          setMessagesLoadError(error?.message || t('chatLoadError'));
-        }
-      }
-    })();
-
-    return () => { cancelled = true; if (typeof stop === 'function') stop(); };
+    let live = true;
+    messagesReadyRef.current = false;
+    setMessagesError('');
+    ensureChatParticipants(chatId, me.uid, user.uid).catch(() => {});
+    const stop = listenMessages(chatId, list => { if (live) { setMessages(list); setMessagesError(''); } }, error => {
+      if (live) setMessagesError(error?.code === 'PERMISSION_DENIED' ? 'Chat access is temporarily unavailable. Reopen the chat or send a message once to initialize it.' : 'Messages could not be loaded right now.');
+    });
+    return () => { live = false; stop?.(); };
   }, [chatId, me.uid, user.uid]);
   useEffect(() => listenHidden(me.uid, chatId, setHidden), [chatId, me.uid]);
   useEffect(() => listenTyping(chatId, setTypingUsers), [chatId]);
@@ -433,8 +415,11 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
     const incoming = messages.filter(m => m.receiverId === me.uid);
     const latest = incoming[incoming.length - 1];
     if (active && latest && listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+      const el = listRef.current;
+      const wasNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140 || !messagesReadyRef.current;
+      if (wasNearBottom) el.scrollTop = el.scrollHeight;
     }
+    messagesReadyRef.current = true;
     return () => { active = false; };
   }, [messages, me.uid, chatId]);
 
@@ -659,8 +644,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
         />
       )}
       <div className="messages" ref={listRef} onScroll={handleScroll} style={backgroundPatternStyle(background)}>
-        {messagesLoading && !visibleMessages.length && <div className="messages-loading">{t('pleaseWait')}</div>}
-        {messagesLoadError && <div className="messages-load-error">{messagesLoadError}</div>}
+        {messagesError && !visibleMessages.length && <div className="messages-load-error">{messagesError}</div>}
         {activeDate&&<div className="chat-date-chip">{activeDate}</div>}
         {visibleMessages.map(m => (
           <MessageBubble
@@ -730,12 +714,19 @@ function ContactRow({ u, subtitle, statusUids, unread, onOpenStatus, onOpenChat,
   );
 }
 
-function ContactActionSheet({ user, me, onClose }) {
+function ContactActionSheet({ user, me, onClose, onDeleted, onDeleteFailed, onDeleteStart }) {
   const { t } = usePrefs();
   useBackHandler(onClose);
   async function doDelete() {
-    await removeKnownContact(me.uid, user.uid);
-    onClose();
+    try {
+      onDeleteStart?.(user.uid);
+      await removeKnownContact(me.uid, user.uid);
+      onDeleted?.(user.uid);
+      onClose();
+    } catch (error) {
+      onDeleteFailed?.(user.uid);
+      console.error('Contact delete failed:', error);
+    }
   }
   async function doBlock() {
     await blockUser(me.uid, user.uid);
@@ -918,6 +909,7 @@ function AppShell({ me, profile }) {
   const { t, lang, background } = usePrefs();
   const [users, setUsers] = useState([]);
   const [knownContacts, setKnownContacts] = useState({});
+  const contactDeleteBackup = useRef({});
   const [adminUid, setAdminUid] = useState(null);
   const [query, setQuery] = useState('');
   const [discovered, setDiscovered] = useState(null); // a person found via exact email/ID search, not yet in your list
@@ -1100,7 +1092,10 @@ function AppShell({ me, profile }) {
           setPreviews(prev => ({ ...prev, [chatId]: { text: latest.text, mine: latest.senderId === me.uid, at: latest.createdAt || 0 } }));
         }
         if (!first && latest?.receiverId === me.uid && !latest.seen && notificationsReady && chatUser?.uid !== user.uid) {
-          showMessageNotification({ title: user.name, body: latest.text || (latest.type === 'video' ? '🎥 Video' : latest.type === 'file' ? `📎 ${latest.fileName || 'File'}` : '📷 Image'), id: Number(Date.now() % 2147483647), extra: { type: 'message', senderId: user.uid, chatId } });
+          const notificationSeed = `${chatId}:${latest.id}`;
+          let notificationId = 0;
+          for (let i = 0; i < notificationSeed.length; i++) notificationId = ((notificationId * 31) + notificationSeed.charCodeAt(i)) | 0;
+          showMessageNotification({ title: user.name, body: latest.text || (latest.type === 'video' ? '🎥 Video' : latest.type === 'file' ? `📎 ${latest.fileName || 'File'}` : '📷 Image'), id: Math.abs(notificationId) || 1, extra: { type: 'message', senderId: user.uid, chatId, messageId: latest.id } });
         }
         first = false;
       });
@@ -1125,6 +1120,16 @@ function AppShell({ me, profile }) {
   const totalUnread = Object.values(unread).reduce((sum, value) => sum + (Number(value) || 0), 0);
   const adminUser = adminProfile;
   const isAdmin = profile.role === 'admin';
+
+  function handleHomeSearchChange(value) {
+    setQuery(value);
+    if (isAdmin && value.trim() === getAdminCode()) {
+      setQuery('');
+      setDiscovered(null);
+      setSettings(false);
+      setView('admin');
+    }
+  }
 
   const callUi = (
     <>
@@ -1163,7 +1168,6 @@ function AppShell({ me, profile }) {
           <div className="brand-line"><ShieldCheck /><div><b>Admin Dashboard</b><small>{profile.name}</small></div></div>
         </header>
         <main className="content"><AdminPanel users={users} me={me} /></main>
-        <AdminTabBar view={view} setView={setView} />
       </div>
     );
   }
@@ -1190,7 +1194,7 @@ function AppShell({ me, profile }) {
         </button>
       </header>
       <main className="content">
-        <div className="search"><Search size={19} /><input placeholder={t('searchPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></div>
+        <div className="search"><Search size={19} /><input placeholder={t('searchPlaceholder')} value={query} onChange={e => handleHomeSearchChange(e.target.value)} /></div>
 
         {discovering && <div className="empty small">{t('pleaseWait')}</div>}
         {discovered && (
@@ -1217,6 +1221,9 @@ function AppShell({ me, profile }) {
         <ContactActionSheet
           user={contactAction} me={me}
           onClose={() => setContactAction(null)}
+          onDeleteStart={uid => setKnownContacts(prev => { contactDeleteBackup.current[uid] = prev[uid]; const next = { ...prev }; delete next[uid]; return next; })}
+          onDeleted={uid => { delete contactDeleteBackup.current[uid]; }}
+          onDeleteFailed={uid => { const old = contactDeleteBackup.current[uid]; if (old !== undefined) setKnownContacts(prev => ({ ...prev, [uid]: old })); delete contactDeleteBackup.current[uid]; }}
         />
       )}
       {settings && <SettingsDrawer
@@ -1230,7 +1237,6 @@ function AppShell({ me, profile }) {
       />}
       {statusOwner && <StatusViewer key={statusOwner.uid} owner={statusOwner} me={me} startIndex={statusStart} onClose={() => setStatusOwner(null)} />}
       {composing && <StatusComposer me={me} onClose={() => setComposing(false)} />}
-      {isAdmin && <AdminTabBar view={view} setView={setView} />}
       {callUi}
     </div>
   );
@@ -1536,7 +1542,6 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
       <button className="setting-row" onClick={() => setPanel('privacy')}><Lock /> {t('privacy')} <span className="row-end">›</span></button>
       <button className="setting-row" onClick={() => setPanel('applock')}><ShieldCheck /> {t('appLock')} <span className="row-end status-text">{isPinSet() ? t('on') : t('off')}</span></button>
       <button className="setting-row" onClick={() => setPanel('update')}><RefreshCw /> {t('update')} <span className="row-end status-text">v{APP_VERSION}</span></button>
-      {profile.role === 'admin' && <button className="setting-row" onClick={onOpenAdmin}><LayoutGrid /> {t('adminDashboardOpen')} <span className="row-end">›</span></button>}
       <button className="setting-row danger" onClick={() => setPanel('logout')}><LogOut /> {t('logout')}</button>
     </div>
   </>;
@@ -1548,6 +1553,27 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
       </aside>
     </div>
   );
+}
+
+function AdminCodePanel() {
+  const { t } = usePrefs();
+  const [code, setCode] = useState(() => getAdminCode());
+  const [draft, setDraft] = useState(() => getAdminCode());
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+  function save() {
+    setError(''); setSaved(false);
+    if (!validateAdminCode(draft)) { setError(t('adminCodeInvalid')); return; }
+    try { setAdminCode(draft); setCode(draft); setSaved(true); setTimeout(() => setSaved(false), 1200); }
+    catch (e) { setError(e.message || t('adminCodeInvalid')); }
+  }
+  return <div className="admin-code-panel">
+    <b>{t('adminCodeTitle')}</b>
+    <small>{t('adminCodeHint')}</small>
+    <input value={draft} onChange={e => setDraft(e.target.value)} maxLength={24} spellCheck={false} />
+    <div className="admin-code-actions"><button className="primary" onClick={save}>{saved ? t('saved') : t('save')}</button><button className="secondary" onClick={() => { setDraft(code); setError(''); }}>{t('cancel')}</button></div>
+    {error && <small className="error">{error}</small>}
+  </div>;
 }
 
 function AdminPanel({ users, me }) {
@@ -1609,6 +1635,8 @@ function AdminPanel({ users, me }) {
 
   return <div className="admin">
     <div className="admin-title"><ShieldCheck size={18} /><h3>{t('adminControls')}</h3></div>
+
+    <AdminCodePanel />
 
     <div className="admin-stats">
       <div><b>{users.length}</b><small>{t('totalMembers')}</small></div>

@@ -5,7 +5,7 @@ import {
   commentOnStatus, listenStatusComments, listenStatusViewCount,
   deleteOwnStatus, normalizeSegments, statusSeconds, IMAGE_STATUS_SECONDS
 } from '../lib/status';
-import { getCachedMediaUrl, videoFirstFrameSrc } from '../lib/media';
+import { videoFirstFrameSrc } from '../lib/media';
 import { Avatar } from './Profile';
 import { useBackHandler } from '../lib/backStack';
 import { usePrefs } from '../context/Prefs';
@@ -18,14 +18,12 @@ const FLIP_MS = 380;
 function StatusMedia({ item, active, paused, onProgress, onDone, onDuration }) {
   const [loading, setLoading] = useState(item.type !== 'text');
   const [fit, setFit] = useState('cover');
-  const [source, setSource] = useState(item.content);
   const videoRef = useRef(null);
   const segsRef = useRef([]);
   const doneRef = useRef(false);
   const pausedRef = useRef(paused);
   const activeRef = useRef(active);
   pausedRef.current = paused;
-  useEffect(() => { let alive = true; if (item.type === 'image' || item.type === 'video') getCachedMediaUrl(item.content, item.type).then(v => { if (alive) setSource(v || item.content); }).catch(() => {}); return () => { alive = false; }; }, [item.id, item.type, item.content]);
   activeRef.current = active;
   const cb = useRef({});
   cb.current = { onProgress, onDone, onDuration };
@@ -95,8 +93,10 @@ function StatusMedia({ item, active, paused, onProgress, onDone, onDuration }) {
     const v = videoRef.current;
     if (!v || item.type !== 'video') return;
     if (active && !paused) {
+      v.muted = false;
+      v.volume = 1;
       const p = v.play();
-      if (p?.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+      if (p?.catch) p.catch(() => {});
     } else v.pause();
   }, [active, paused, item.id, item.type]);
 
@@ -111,13 +111,13 @@ function StatusMedia({ item, active, paused, onProgress, onDone, onDuration }) {
   return (
     <>
       {item.type === 'image' && (
-        <img className={`status-fill fit-${fit}`} src={source} alt="" draggable={false}
+        <img className={`status-fill fit-${fit}`} src={item.content} alt="" draggable={false}
           onLoad={e => { setFit(e.currentTarget.naturalHeight > e.currentTarget.naturalWidth ? 'cover' : 'contain'); setLoading(false); }}
           onError={() => setLoading(false)} />
       )}
       {item.type === 'video' && (
-        <video ref={videoRef} className={`status-fill fit-${fit}`} src={videoFirstFrameSrc(source)}
-          preload="auto" playsInline
+        <video ref={videoRef} className={`status-fill fit-${fit}`} src={videoFirstFrameSrc(item.content)}
+          preload="auto" playsInline autoPlay muted={false}
           onLoadedData={() => setLoading(false)}
           onWaiting={() => setLoading(true)}
           onPlaying={() => setLoading(false)}
@@ -195,13 +195,26 @@ export function StatusViewer({ owner, me, onClose, startIndex = 0 }) {
   const handleDone = useCallback(() => go(index + 1), [go, index]);
   const handleProgress = useCallback(f => { if (barRef.current) barRef.current.style.width = `${f * 100}%`; }, []);
 
+  function resumeCurrentVideo() {
+    const video = document.querySelector('.status-viewer video.status-fill');
+    if (!video) return;
+    try {
+      video.muted = false;
+      video.volume = 1;
+      const p = video.play();
+      if (p?.catch) p.catch(() => {});
+    } catch {}
+  }
+
   function onPointerDown(e) {
+    resumeCurrentVideo();
     downAt.current = { x: e.clientX, y: e.clientY };
     heldByHold.current = false;
     clearTimeout(holdTimer.current);
     holdTimer.current = setTimeout(() => { heldByHold.current = true; setHeld(true); }, 220);
   }
   function onPointerUp(e) {
+    resumeCurrentVideo();
     clearTimeout(holdTimer.current);
     if (heldByHold.current) { heldByHold.current = false; setHeld(false); return; }
     if (Math.abs(e.clientX - downAt.current.x) > 14 || Math.abs(e.clientY - downAt.current.y) > 14) return;

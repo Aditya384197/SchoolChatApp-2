@@ -2,7 +2,6 @@ import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '@capacitor/core';
 
 const CatboxUploader = registerPlugin('CatboxUploader');
-const MediaCache = registerPlugin('MediaCache');
 
 export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 export const MAX_STATUS_MEDIA_BYTES = MAX_UPLOAD_BYTES;
@@ -73,81 +72,58 @@ function readAsDataUrl(file) {
 }
 
 export async function uploadFileToCatbox(file, onProgress) {
-  if (!Capacitor.isNativePlatform()) {
-    throw new Error('File uploads are available in the Android app.');
-  }
+  if (!Capacitor.isNativePlatform()) throw new Error('File uploads are available in the Android app.');
   if (!file) throw new Error('Please choose a file.');
   if (!isSupportedAttachment(file)) throw new Error('Supported files: images, videos, PDF and .bin.');
 
   const prepared = await compressImage(file);
   if (prepared.size > MAX_UPLOAD_BYTES) throw new Error('File is larger than 15 MB.');
 
-  // Large base64 strings crossing the WebView/native bridge can fail on
-  // Android 10+ even when the network itself is fine. Newer native plugin
-  // builds accept 256 KiB chunks and stream the final multipart upload.
-  if (typeof CatboxUploader.beginUpload === 'function') {
-    let uploadId = '';
+  let listener = null;
+  try {
+    if (onProgress) {
+      onProgress(0);
+      try {
+        listener = await CatboxUploader.addListener('uploadProgress', ev => {
+          const total = Number(ev?.total) || prepared.size;
+          onProgress(Math.max(0, Math.min(1, Number(ev?.sent || 0) / total)));
+        });
+      } catch {}
+    }
+
+    const session = await CatboxUploader.beginUpload({ totalBytes: prepared.size });
+    const uploadId = String(session?.uploadId || '');
+    if (!uploadId) throw new Error('Could not create upload session.');
+
+    const chunkSize = 256 * 1024;
     try {
-      const begun = await CatboxUploader.beginUpload({
+      for (let offset = 0; offset < prepared.size; offset += chunkSize) {
+        const chunk = await prepared.slice(offset, Math.min(offset + chunkSize, prepared.size)).arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(chunk);
+        const step = 0x8000;
+        for (let i = 0; i < bytes.length; i += step) binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + step, bytes.length)));
+        const encoded = btoa(binary);
+        await CatboxUploader.appendUploadChunk({ uploadId, chunkBase64: encoded });
+      }
+      const result = await CatboxUploader.finishUpload({
+        uploadId,
         fileName: prepared.name || 'upload.bin',
         mimeType: prepared.type || 'application/octet-stream',
-        totalBytes: prepared.size,
       });
-      uploadId = String(begun?.uploadId || '');
-      if (!uploadId) throw new Error('The media upload session could not be created.');
-
-      const chunkSize = 256 * 1024;
-      let sent = 0;
-      onProgress?.(0);
-      for (let offset = 0; offset < prepared.size; offset += chunkSize) {
-        const chunk = new Uint8Array(await prepared.slice(offset, Math.min(prepared.size, offset + chunkSize)).arrayBuffer());
-        let binary = '';
-        for (let i = 0; i < chunk.length; i += 0x8000) {
-          binary += String.fromCharCode(...chunk.subarray(i, Math.min(i + 0x8000, chunk.length)));
-        }
-        await CatboxUploader.appendUploadChunk({ uploadId, chunkBase64: btoa(binary) });
-        sent += chunk.length;
-        onProgress?.(Math.max(0, Math.min(1, sent / prepared.size)));
-      }
-
-      const result = await CatboxUploader.finishUpload({ uploadId });
       const url = String(result?.url || '').trim();
       if (!url.startsWith('https://files.catbox.moe/')) throw new Error('The file host returned an invalid link.');
       onProgress?.(1);
-      uploadId = '';
       return { url, file: prepared, size: prepared.size, kind: getAttachmentKind(prepared) };
     } catch (error) {
-      if (uploadId) await CatboxUploader.cancelUpload({ uploadId }).catch(() => {});
+      await CatboxUploader.cancelUpload({ uploadId }).catch(() => {});
       throw error;
     }
-  }
-
-  // Compatibility fallback for an older already-installed debug APK.
-  let listener = null;
-  if (onProgress) {
-    try {
-      onProgress(0);
-      listener = await CatboxUploader.addListener('uploadProgress', ev => {
-        const total = Number(ev?.total) || prepared.size;
-        onProgress(Math.max(0, Math.min(1, Number(ev?.sent || 0) / total)));
-      });
-    } catch { listener = null; }
-  }
-  try {
-    const dataUrl = await readAsDataUrl(prepared);
-    const result = await CatboxUploader.upload({
-      fileBase64: dataUrl,
-      fileName: prepared.name || 'upload.bin',
-      mimeType: prepared.type || 'application/octet-stream',
-    });
-    const url = String(result?.url || '').trim();
-    if (!url.startsWith('https://files.catbox.moe/')) throw new Error('The file host returned an invalid link.');
-    onProgress?.(1);
-    return { url, file: prepared, size: prepared.size, kind: getAttachmentKind(prepared) };
   } finally {
     try { await listener?.remove(); } catch {}
   }
 }
+
 export async function uploadChatMedia(_uid, _chatId, _messageId, file, onProgress) {
   return uploadFileToCatbox(file, onProgress);
 }
@@ -170,68 +146,37 @@ export async function uploadStatusMedia(_uid, _statusId, file, onProgress) {
 export async function deleteChatImage() { return false; }
 export async function deleteStatusMedia() { return false; }
 
-// ---- Automatic persistent download of received media ------------------------
-const cacheInflight = new Map();
+// ---- Automatic download of received media (WhatsApp-style) -------------------
+// As soon as an incoming image/video message is seen (chat open or not) the
+// file starts loading in the background, so tapping it later opens instantly
+// instead of starting a fresh download. Only runs while the phone is online.
 const prefetched = new Set();
 const keepAlive = [];
 
-function cacheKey(url) { return String(url || '').trim(); }
-
-export async function getCachedMediaUrl(url, kind = '') {
-  const source = cacheKey(url);
-  if (!source) return '';
-  if (!Capacitor.isNativePlatform()) return source;
-
-  const key = source;
-  try {
-    const existing = await MediaCache.get({ key });
-    if (existing?.exists && existing?.path) return Capacitor.convertFileSrc(existing.path);
-  } catch {}
-
-  if (kind !== 'image' && kind !== 'video') return source;
-  if (navigator.onLine === false) return source;
-
-  if (!cacheInflight.has(key)) {
-    cacheInflight.set(key, MediaCache.cache({ url: source, key }).finally(() => cacheInflight.delete(key)));
-  }
-  try {
-    const cached = await cacheInflight.get(key);
-    if (cached?.path) return Capacitor.convertFileSrc(cached.path);
-  } catch {}
-  return source;
-}
-
 export function prefetchMedia(url, kind) {
-  const source = cacheKey(url);
-  if (!source || prefetched.has(source)) return;
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  prefetched.add(source);
-
-  if (Capacitor.isNativePlatform() && (kind === 'image' || kind === 'video')) {
-    void getCachedMediaUrl(source, kind);
-    return;
-  }
-
   try {
+    if (!url || prefetched.has(url)) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    prefetched.add(url);
     if (kind === 'image') {
       const img = new Image();
       img.decoding = 'async';
-      img.src = source;
+      img.src = url;
       keepAlive.push(img);
     } else if (kind === 'video') {
       const video = document.createElement('video');
       video.preload = 'auto';
       video.muted = true;
       video.playsInline = true;
-      video.src = `${source}#t=0.001`;
+      video.src = `${url}#t=0.001`;
       video.load();
       keepAlive.push(video);
     }
     if (keepAlive.length > 40) {
       const old = keepAlive.shift();
-      try { if (old.tagName === 'VIDEO') { old.removeAttribute('src'); old.load(); } else { old.src = ''; } } catch {}
+      try { if (old.tagName === 'VIDEO') { old.removeAttribute('src'); old.load(); } else { old.src = ''; } } catch { /* ignore */ }
     }
-  } catch {}
+  } catch { /* prefetch is best-effort only */ }
 }
 
 // Adds the media-fragment that makes the WebView paint the first frame of a

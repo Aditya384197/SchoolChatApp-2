@@ -3,9 +3,9 @@ package com.aditya.schoolchat;
 import android.content.Context;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
-import android.media.Ringtone;
-import android.media.RingtoneManager;
-import android.media.AudioAttributes;
+import android.media.ToneGenerator;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Build;
 
 import com.getcapacitor.JSObject;
@@ -18,7 +18,10 @@ import java.util.List;
 
 @CapacitorPlugin(name = "AudioRouter")
 public class AudioRouterPlugin extends Plugin {
-    private Ringtone ringtone;
+    private final Handler ringHandler = new Handler(Looper.getMainLooper());
+    private ToneGenerator ringTone;
+    private Runnable ringRunnable;
+
     private AudioManager audioManager() {
         return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
     }
@@ -84,45 +87,55 @@ public class AudioRouterPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void startRingtone(PluginCall call) {
+    public void startRinging(PluginCall call) {
         try {
-            stopRingtoneInternal();
-            android.net.Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-            Ringtone r = RingtoneManager.getRingtone(getContext(), uri);
-            if (r == null) {
-                call.reject("Default ringtone is unavailable.");
-                return;
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                r.setAudioAttributes(new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build());
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.setLooping(true);
-            ringtone = r;
-            r.play();
+            stopRingingInternal();
+            AudioManager audio = audioManager();
+            if (audio != null) audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            ringTone = new ToneGenerator(AudioManager.STREAM_VOICE_CALL, 88);
+            ringRunnable = new Runnable() {
+                @Override public void run() {
+                    if (ringTone == null) return;
+                    try {
+                        ringTone.startTone(ToneGenerator.TONE_SUP_RINGTONE, 650);
+                    } catch (Exception ignored) {}
+                    ringHandler.postDelayed(this, 1550);
+                }
+            };
+            ringRunnable.run();
             call.resolve();
         } catch (Exception e) {
-            ringtone = null;
-            call.reject("Could not start ringtone", e);
+            stopRingingInternal();
+            call.reject("Could not start call ringing.", e);
         }
     }
 
     @PluginMethod
-    public void stopRingtone(PluginCall call) {
-        stopRingtoneInternal();
+    public void stopRinging(PluginCall call) {
+        stopRingingInternal();
         call.resolve();
     }
 
-    private synchronized void stopRingtoneInternal() {
-        try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) { }
-        ringtone = null;
+    private void stopRingingInternal() {
+        if (ringRunnable != null) {
+            ringHandler.removeCallbacks(ringRunnable);
+            ringRunnable = null;
+        }
+        if (ringTone != null) {
+            try { ringTone.stopTone(); } catch (Exception ignored) {}
+            try { ringTone.release(); } catch (Exception ignored) {}
+            ringTone = null;
+        }
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        stopRingingInternal();
+        super.handleOnDestroy();
     }
 
     @PluginMethod
     public void clearRoute(PluginCall call) {
-        stopRingtoneInternal();
         AudioManager audio = audioManager();
         if (audio == null) {
             call.resolve();

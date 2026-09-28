@@ -75,7 +75,7 @@
         ".write": "auth != null && (newData.child('participants').child(auth.uid).exists() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
         "participants": {
           "$uid": {
-            ".validate": "newData.val() === true && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val() || newData.parent().child(auth.uid).val() === true)"
+            ".validate": "newData.val() === true && (auth.uid === $uid || newData.parent().child(auth.uid).val() === true || auth.uid === root.child('config').child('adminUid').val())"
           }
         },
         "typing": {

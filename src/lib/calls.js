@@ -1,12 +1,18 @@
 import React from 'react';
-import { onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
+import { onValue, push, ref, remove, set, update } from 'firebase/database';
 import { db } from '../firebase';
 import { chatIdFor, sendMessage } from './chat';
-import { clearAudioRoute, startRingtone, stopRingtone } from './audioRoute';
+import { clearAudioRoute, startRinging, stopRinging } from './audioRoute';
 
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+];
 const CALL_RING_TIMEOUT_MS = 30 * 1000;
 const DISCONNECT_GRACE_MS = 8 * 1000;
+const CONNECT_TIMEOUT_MS = 18 * 1000;
 
 function errorMessage(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
@@ -63,15 +69,11 @@ export function useVoiceCall({ uid, users }) {
   const ringTimerRef = React.useRef(null);
   const disconnectedTimerRef = React.useRef(null);
   const finishingRef = React.useRef(false);
+  const connectTimerRef = React.useRef(null);
+  const iceRestartRef = React.useRef(false);
 
   React.useEffect(() => { activeRef.current = activeCall; }, [activeCall]);
   React.useEffect(() => { incomingRef.current = incomingCall; }, [incomingCall]);
-  React.useEffect(() => {
-    const ringing = Boolean(incomingCall || activeCall?.status === 'ringing');
-    if (ringing) startRingtone();
-    else stopRingtone();
-    return () => { stopRingtone(); };
-  }, [Boolean(incomingCall), activeCall?.status]);
   React.useEffect(() => {
     if (!activeCall?.peer?.uid) return undefined;
     const peerUid = activeCall.peer.uid;
@@ -84,8 +86,10 @@ export function useVoiceCall({ uid, users }) {
   function clearTimers() {
     clearTimeout(ringTimerRef.current);
     clearTimeout(disconnectedTimerRef.current);
+    clearTimeout(connectTimerRef.current);
     ringTimerRef.current = null;
     disconnectedTimerRef.current = null;
+    connectTimerRef.current = null;
   }
 
   function stopCandidateListener() {
@@ -107,6 +111,7 @@ export function useVoiceCall({ uid, users }) {
     peerUidRef.current = null;
     remoteDescriptionSetRef.current = false;
     clearAudioRoute().catch(() => {});
+    stopRinging().catch(() => {});
     setRemoteStream(null);
     setMuted(false);
   }
@@ -180,15 +185,30 @@ export function useVoiceCall({ uid, users }) {
       if (streamFromPeer) setRemoteStream(streamFromPeer);
     };
     pc.onicecandidate = event => {
-      if (!event.candidate) return;
+      if (!event.candidate || currentCallIdRef.current === null || currentCallIdRef.current !== callId) return;
       const candidate = event.candidate.toJSON ? event.candidate.toJSON() : event.candidate;
       set(push(ref(db, `calls/${callId}/candidates/${uid}`)), candidate).catch(() => {});
+    };
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      if (state === 'connected' || state === 'completed') {
+        clearTimeout(disconnectedTimerRef.current);
+        disconnectedTimerRef.current = null;
+        clearTimeout(connectTimerRef.current);
+        connectTimerRef.current = null;
+      } else if (state === 'failed' && !iceRestartRef.current) {
+        iceRestartRef.current = true;
+        try { pc.restartIce?.(); } catch {}
+      }
     };
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       if (state === 'connected') {
         clearTimeout(disconnectedTimerRef.current);
+        clearTimeout(connectTimerRef.current);
         disconnectedTimerRef.current = null;
+        connectTimerRef.current = null;
+        stopRinging().catch(() => {});
         setActiveCall(prev => prev ? {
           ...prev,
           status: 'active',
@@ -201,8 +221,14 @@ export function useVoiceCall({ uid, users }) {
             finishCall(callId).catch(() => {});
           }
         }, DISCONNECT_GRACE_MS);
-      } else if (state === 'failed' || state === 'closed') {
+      } else if (state === 'failed') {
+        if (!iceRestartRef.current) {
+          iceRestartRef.current = true;
+          try { pc.restartIce?.(); return; } catch {}
+        }
         finishCall(callId).catch(() => {});
+      } else if (state === 'closed') {
+        if (!finishingRef.current) finishCall(callId).catch(() => {});
       }
     };
 
@@ -211,6 +237,7 @@ export function useVoiceCall({ uid, users }) {
     currentCallIdRef.current = callId;
     roleRef.current = role;
     peerUidRef.current = remoteUid;
+    iceRestartRef.current = false;
     listenCandidates(callId, remoteUid);
     return pc;
   }
@@ -234,7 +261,7 @@ export function useVoiceCall({ uid, users }) {
       const offer = await pc.createOffer({ offerToReceiveAudio: true });
       await pc.setLocalDescription(offer);
       setActiveCall({ chatId: callId, peer, direction: 'outgoing', status: 'ringing', startedAt: null });
-      await onDisconnect(ref(db, `calls/${callId}/status`)).set('ended').catch(() => {});
+      await startRinging().catch(() => {});
       await update(ref(db, `calls/${callId}`), {
         offer: { type: offer.type, sdp: offer.sdp },
       });
@@ -268,18 +295,24 @@ export function useVoiceCall({ uid, users }) {
       const peer = call.peer || users.find(user => user.uid === callerUid) || { uid: callerUid, name: 'वॉइस कॉल' };
       const pc = await createPeer(call.chatId, callerUid, 'callee');
       remoteDescriptionSetRef.current = false;
+      await stopRinging().catch(() => {});
       await pc.setRemoteDescription(call.offer);
       remoteDescriptionSetRef.current = true;
       await flushCandidates();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       setActiveCall({ chatId: call.chatId, peer, direction: 'incoming', status: 'connecting', startedAt: null });
-      await onDisconnect(ref(db, `calls/${call.chatId}/status`)).set('ended').catch(() => {});
       await update(ref(db, `calls/${call.chatId}`), {
         status: 'accepted',
         acceptedAt: Date.now(),
         answer: { type: answer.type, sdp: answer.sdp },
       });
+      clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = setTimeout(() => {
+        if (currentCallIdRef.current === call.chatId && pcRef.current && pcRef.current.connectionState !== 'connected') {
+          finishCall(call.chatId).catch(() => {});
+        }
+      }, CONNECT_TIMEOUT_MS);
     } catch (error) {
       setCallError(errorMessage(error));
       await update(ref(db, `calls/${call.chatId}`), { status: 'ended', endedAt: Date.now(), endedBy: uid }).catch(() => {});
@@ -304,6 +337,13 @@ export function useVoiceCall({ uid, users }) {
     localStreamRef.current?.getAudioTracks?.().forEach(track => { track.enabled = !next; });
     setMuted(next);
   }
+
+  React.useEffect(() => {
+    const ringing = Boolean(incomingCall || activeCall?.status === 'ringing');
+    if (ringing) startRinging().catch(() => {});
+    else stopRinging().catch(() => {});
+    return () => { stopRinging().catch(() => {}); };
+  }, [incomingCall?.chatId, activeCall?.chatId, activeCall?.status]);
 
   React.useEffect(() => {
     if (!db || !uid || !Array.isArray(users)) return undefined;

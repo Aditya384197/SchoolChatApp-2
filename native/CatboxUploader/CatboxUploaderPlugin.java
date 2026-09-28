@@ -12,13 +12,13 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -125,51 +125,9 @@ public class CatboxUploaderPlugin extends Plugin {
     // Downloads a Catbox file and hands the bytes back as base64. Used to fetch
     // locked (encrypted) attachments so they can be decrypted on-device --
     // avoids the browser's CORS restrictions a plain fetch() would hit.
-    @PluginMethod
-    public void download(PluginCall call) {
-        final String url = call.getString("url", "");
-        if (url.isEmpty() || !url.startsWith("https://files.catbox.moe/")) {
-            call.reject("Invalid file link.");
-            return;
-        }
-        executor.execute(() -> {
-            HttpURLConnection connection = null;
-            try {
-                connection = (HttpURLConnection) new URL(url).openConnection();
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(20_000);
-                connection.setReadTimeout(120_000);
-                int code = connection.getResponseCode();
-                if (code != 200) {
-                    call.reject("Download failed (HTTP " + code + ").");
-                    return;
-                }
-                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream())) {
-                    byte[] chunk = new byte[CHUNK_BYTES];
-                    int read;
-                    while ((read = in.read(chunk)) != -1) {
-                        buffer.write(chunk, 0, read);
-                        if (buffer.size() > MAX_BYTES) {
-                            call.reject("File is larger than 15 MB.");
-                            return;
-                        }
-                    }
-                }
-                JSObject result = new JSObject();
-                result.put("data", Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP));
-                call.resolve(result);
-            } catch (Exception e) {
-                call.reject("Download error: " + e.getMessage());
-            } finally {
-                if (connection != null) connection.disconnect();
-            }
-        });
-    }
-
 
     private File uploadDir() {
-        File dir = new File(getContext().getCacheDir(), "school-chat-upload-v2");
+        File dir = new File(getContext().getCacheDir(), "school-chat-upload-v3");
         if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("Upload cache directory could not be created.");
         return dir;
     }
@@ -229,16 +187,12 @@ public class CatboxUploaderPlugin extends Plugin {
         final String id = call.getString("uploadId", "").trim();
         final String fileName = sanitizeFileName(call.getString("fileName", "upload.bin"));
         final String mimeType = sanitizeMime(call.getString("mimeType", "application/octet-stream"));
-        if (!isSafeUploadId(id)) {
-            call.reject("Invalid upload session.");
-            return;
-        }
+        if (!isSafeUploadId(id)) { call.reject("Invalid upload session."); return; }
         final File target = new File(uploadDir(), id + ".part");
         if (!target.isFile() || target.length() <= 0 || target.length() > MAX_BYTES) {
             call.reject("Upload session is missing or invalid.");
             return;
         }
-
         executor.execute(() -> {
             Exception last = null;
             for (int attempt = 0; attempt < 3; attempt++) {
@@ -246,16 +200,15 @@ public class CatboxUploaderPlugin extends Plugin {
                 try {
                     String boundary = "----SchoolChat" + System.currentTimeMillis();
                     byte[] head = (
-                            "--" + boundary + "\r\n"
-                            + "Content-Disposition: form-data; name=\"reqtype\"\r\n\r\n"
-                            + "fileupload\r\n"
-                            + "--" + boundary + "\r\n"
-                            + "Content-Disposition: form-data; name=\"fileToUpload\"; filename=\"" + fileName + "\"\r\n"
-                            + "Content-Type: " + mimeType + "\r\n\r\n"
+                        "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"reqtype\"\r\n\r\n"
+                        + "fileupload\r\n"
+                        + "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"fileToUpload\"; filename=\"" + fileName + "\"\r\n"
+                        + "Content-Type: " + mimeType + "\r\n\r\n"
                     ).getBytes(StandardCharsets.UTF_8);
                     byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
                     long totalLength = head.length + target.length() + tail.length;
-
                     connection = (HttpURLConnection) new URL(API_URL).openConnection();
                     connection.setRequestMethod("POST");
                     connection.setDoOutput(true);
@@ -263,52 +216,38 @@ public class CatboxUploaderPlugin extends Plugin {
                     connection.setReadTimeout(180_000);
                     connection.setUseCaches(false);
                     connection.setFixedLengthStreamingMode(totalLength);
-                    connection.setRequestProperty("User-Agent", "SchoolChat/1.5.0");
+                    connection.setRequestProperty("User-Agent", "SchoolChat/1.8.0");
                     connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-
                     try (OutputStream raw = connection.getOutputStream();
                          BufferedOutputStream out = new BufferedOutputStream(raw, CHUNK_BYTES);
                          FileInputStream in = new FileInputStream(target)) {
                         out.write(head);
                         byte[] buffer = new byte[CHUNK_BYTES];
-                        long sent = 0;
-                        long lastReport = 0;
-                        int count;
+                        long sent = 0; int count; long lastReport = 0;
                         while ((count = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, count);
-                            sent += count;
+                            out.write(buffer, 0, count); sent += count;
                             long now = System.currentTimeMillis();
                             if (now - lastReport > 120 || sent == target.length()) {
                                 lastReport = now;
                                 JSObject progress = new JSObject();
-                                progress.put("sent", sent);
-                                progress.put("total", target.length());
+                                progress.put("sent", sent); progress.put("total", target.length());
                                 notifyListeners("uploadProgress", progress);
                             }
                         }
-                        out.write(tail);
-                        out.flush();
+                        out.write(tail); out.flush();
                     }
-
                     int responseCode = connection.getResponseCode();
                     InputStream source = responseCode >= 200 && responseCode < 300 ? connection.getInputStream() : connection.getErrorStream();
                     String response = readAll(source).trim();
                     if (responseCode < 200 || responseCode >= 300) throw new IllegalStateException("Catbox upload failed (HTTP " + responseCode + ").");
                     if (!response.startsWith("https://files.catbox.moe/")) throw new IllegalStateException(response.isEmpty() ? "Catbox returned an invalid response." : response);
-
-                    long uploadedSize = target.length();
-                    target.delete();
-                    JSObject result = new JSObject();
-                    result.put("url", response);
-                    result.put("size", uploadedSize);
-                    call.resolve(result);
+                    long uploadedSize = target.length(); target.delete();
+                    JSObject result = new JSObject(); result.put("url", response); result.put("size", uploadedSize); call.resolve(result);
                     return;
                 } catch (Exception e) {
                     last = e;
-                    try { Thread.sleep(400L * (attempt + 1)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-                } finally {
-                    if (connection != null) connection.disconnect();
-                }
+                    try { Thread.sleep(350L * (attempt + 1)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                } finally { if (connection != null) connection.disconnect(); }
             }
             call.reject(last == null || last.getMessage() == null ? "File upload failed." : last.getMessage());
         });
@@ -321,8 +260,48 @@ public class CatboxUploaderPlugin extends Plugin {
         call.resolve();
     }
 
-    private static boolean isSafeUploadId(String id) {
-        return id.matches("[A-Za-z0-9]{16,40}");
+    private static boolean isSafeUploadId(String id) { return id.matches("[A-Za-z0-9]{16,40}"); }
+
+    @PluginMethod
+    public void download(PluginCall call) {
+        final String url = call.getString("url", "");
+        if (url.isEmpty() || !url.startsWith("https://files.catbox.moe/")) {
+            call.reject("Invalid file link.");
+            return;
+        }
+        executor.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(url).openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(20_000);
+                connection.setReadTimeout(120_000);
+                int code = connection.getResponseCode();
+                if (code != 200) {
+                    call.reject("Download failed (HTTP " + code + ").");
+                    return;
+                }
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                try (BufferedInputStream in = new BufferedInputStream(connection.getInputStream())) {
+                    byte[] chunk = new byte[CHUNK_BYTES];
+                    int read;
+                    while ((read = in.read(chunk)) != -1) {
+                        buffer.write(chunk, 0, read);
+                        if (buffer.size() > MAX_BYTES) {
+                            call.reject("File is larger than 15 MB.");
+                            return;
+                        }
+                    }
+                }
+                JSObject result = new JSObject();
+                result.put("data", Base64.encodeToString(buffer.toByteArray(), Base64.NO_WRAP));
+                call.resolve(result);
+            } catch (Exception e) {
+                call.reject("Download error: " + e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
     }
 
     private static void writeText(OutputStream out, String value) throws Exception {

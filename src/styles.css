@@ -793,59 +793,21 @@ body { overflow:hidden; }
 :root[data-theme="dark"] .background-preview-bubble.mine { background: #14532d; }
 
 
-/* ===== Stability / inset fixes for Android 10+ ===== */
-html, body, #root { overscroll-behavior: none; }
+/* v1.11 stability: keep chat/status actions above Android navigation buttons. */
+.chat-screen .composer { margin-bottom: 0 !important; padding-bottom: calc(9px + env(safe-area-inset-bottom, 0px)); }
+.chat-screen .messages { padding-bottom: 10px; }
+.status-composer-overlay { padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+.status-composer { max-height: min(88dvh, 760px); }
+.status-publish { margin-bottom: 2px; }
 
-/* The system navigation buttons are transparent in edge-to-edge mode. Reserve
-   their exact height as real layout space instead of letting the last button
-   row occupy the same touch rectangle as Back/Home/Recents. */
-.chat-screen .composer {
-  margin-bottom: var(--sc-bottom-safe, var(--sc-system-bottom, 0px));
-  padding-bottom: 9px;
-}
-.chat-screen .messages { padding-bottom: 12px; }
-.chat-screen .composer input { position: relative; z-index: 2; }
-.chat-screen .composer button { position: relative; z-index: 3; }
+/* v1.11: admin dashboard remains visually separate; it is reachable only by the secret search code. */
+.admin-code-panel { display:flex; flex-direction:column; gap:8px; margin:0 0 16px; padding:14px; border:1px solid #dbe3ee; border-radius:16px; background:#f8fafc; }
+.admin-code-panel input { width:100%; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:11px; padding:10px 12px; font:inherit; }
+.admin-code-panel small { color:#64748b; line-height:1.35; }
+.admin-code-actions { display:flex; gap:8px; }
+.admin-code-actions button { flex:1; }
+:root[data-theme="dark"] .admin-code-panel { background:#111a2e; border-color:#26344a; color:#e2e8f0; }
+:root[data-theme="dark"] .admin-code-panel input { background:#0b1220; border-color:#334155; color:#f1f5f9; }
 
-/* Keyboard: let Android resize the WebView, then keep the composer inside
-   the resized viewport; do not allow it to slip under the IME. */
-.chat-screen:focus-within .composer { scroll-margin-bottom: 12px; }
-
-/* Status composer/action button must sit above the transparent navigation bar. */
-.status-composer-overlay {
-  padding-top: var(--sc-system-top, 0px);
-  padding-bottom: var(--sc-system-bottom, 0px);
-}
-.status-composer {
-  max-height: calc(92vh - var(--sc-system-top, 0px) - var(--sc-system-bottom, 0px));
-  padding-bottom: 18px;
-}
-.status-publish { margin-bottom: 2px; position: relative; z-index: 4; }
-
-/* Avatar picker: the modal itself gets an explicit top/bottom safety boundary,
-   so the emoji grid can never occupy the clock/battery region or navigation area. */
-.avatar-modal-overlay {
-  padding-top: var(--sc-system-top, 0px);
-  padding-bottom: var(--sc-system-bottom, 0px);
-  backdrop-filter: none;
-}
-.avatar-modal {
-  max-height: calc(100vh - var(--sc-system-top, 0px) - var(--sc-system-bottom, 0px) - 12px);
-}
-.avatar-modal-scroll {
-  max-height: calc(100vh - var(--sc-system-top, 0px) - var(--sc-system-bottom, 0px) - 92px);
-  padding-bottom: 20px;
-}
-
-/* Attachment/status overlays should not blur their own contrast on Android 10. */
-.source-overlay, .info-overlay, .status-confirm { backdrop-filter: none; }
-.source-overlay { padding-bottom: var(--sc-system-bottom, 0px); }
-.source-card { margin-bottom: 0; }
-
-/* Call controls and status footer also stay above transparent navigation. */
-.call2-actions { margin-bottom: var(--sc-system-bottom, 0px); }
-.status-footer { padding-bottom: calc(10px + var(--sc-system-bottom, 0px)); }
-
-/* Prevent a horizontal strip from accepting taps after the WebView has been
-   resized by the keyboard. */
-.composer, .status-publish, .status-footer { touch-action: manipulation; }
+/* The composer should never animate from the top when a chat screen mounts. */
+.chat-screen { animation: slideInRight .16s cubic-bezier(.22,.9,.32,1) !important; }
