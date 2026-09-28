@@ -854,3 +854,125 @@ body { overflow:hidden; }
 .admin-log-media .video-thumb{width:100%}
 :root[data-theme="dark"] .admin-more{background:#172554;color:#bfdbfe;border-color:#1e3a8a}
 :root[data-theme="dark"] .admin-log-media{background:#020617}
+
+
+/* v1.9.1: final interaction stability fixes */
+/* Chat should not visually move the composer during mount; only the view
+   itself changes. This prevents the brief top-to-bottom jump on Android 10+. */
+.screen.chat-screen,
+.chat-screen { animation: none !important; transform: none !important; }
+
+/* Reserve Android system-bar regions. Modal content begins below the status
+   strip and ends above the navigation area, so avatars/actions can never
+   occupy those non-app touch regions. */
+.avatar-modal-overlay {
+  inset: var(--sc-system-top) 0 var(--sc-bottom-safe) 0 !important;
+  padding: 10px 10px 0 !important;
+  align-items: flex-end !important;
+  overflow: hidden !important;
+  box-sizing: border-box;
+  backdrop-filter: none !important;
+}
+.avatar-modal {
+  max-height: calc(100% - 10px) !important;
+  width: min(620px, 100%) !important;
+}
+.avatar-modal-scroll {
+  max-height: calc(100% - 78px) !important;
+}
+
+/* App-lock inside Settings: restore the compact original keypad position.
+   Navigation is supplied by PanelHeader, so there is no bottom cancel control
+   competing with Android's three-button navigation area. */
+.pin-page {
+  min-height: 0 !important;
+  flex: 0 0 auto !important;
+  padding: 0 0 var(--sc-bottom-safe) !important;
+}
+.pin-page .pin-pad {
+  flex: 0 0 auto !important;
+  width: min(320px, 92%) !important;
+  margin: 0 auto !important;
+  justify-content: flex-start !important;
+  gap: 14px !important;
+  padding: 10px 6px 6px !important;
+}
+.pin-page .pin-pad > b { margin-top: 0 !important; }
+.pin-page .pin-grid {
+  margin: 6px auto 0 !important;
+  grid-template-columns: repeat(3, 62px) !important;
+  gap: 16px 18px !important;
+}
+.pin-page .pin-grid button {
+  width: 62px !important;
+  height: 62px !important;
+  border-radius: 50% !important;
+  font-size: 22px !important;
+}
+
+/* Prevent the home contacts screen from briefly saying "No contacts" while
+   the individual Firebase user listeners are still hydrating. */
+.contacts-skeleton { display: grid; gap: 8px; }
+.contact-skeleton-row {
+  height: 66px; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 16px; background: rgba(255,255,255,.75);
+  border: 1px solid #eef2f7;
+}
+.contact-skeleton-avatar {
+  width: 46px; height: 46px; border-radius: 50%; flex: none;
+  background: linear-gradient(100deg,#e5e7eb 20%,#f8fafc 40%,#e5e7eb 60%);
+  background-size: 200% 100%; animation: skeletonPulse 1.15s ease-in-out infinite;
+}
+.contact-skeleton-lines { flex: 1; display: grid; gap: 8px; }
+.contact-skeleton-lines i {
+  display: block; height: 10px; border-radius: 8px;
+  background: linear-gradient(100deg,#e5e7eb 20%,#f8fafc 40%,#e5e7eb 60%);
+  background-size: 200% 100%; animation: skeletonPulse 1.15s ease-in-out infinite;
+}
+.contact-skeleton-lines i:first-child { width: 52%; }
+.contact-skeleton-lines i:last-child { width: 34%; }
+@keyframes skeletonPulse { 50% { background-position: 100% 0; opacity: .72; } }
+:root[data-theme="dark"] .contact-skeleton-row { background: #111a2e; border-color: #1e293b; }
+:root[data-theme="dark"] .contact-skeleton-avatar,
+:root[data-theme="dark"] .contact-skeleton-lines i {
+  background: linear-gradient(100deg,#1e293b 20%,#334155 40%,#1e293b 60%);
+  background-size: 200% 100%;
+}
+
+/* Incoming-call answer interaction: press the green handset and slide it
+   upward. Release below the threshold simply snaps the control back. */
+.incoming-call-actions {
+  display: flex; align-items: flex-end; justify-content: space-evenly;
+  gap: 40px; padding: 16px 20px 8px;
+}
+.answer-slider-wrap { min-width: 102px; }
+.answer-slider-track {
+  position: relative; width: 78px; height: 132px; margin: 0 auto;
+  border-radius: 40px; background: rgba(255,255,255,.11);
+  border: 1px solid rgba(255,255,255,.16); display: flex;
+  justify-content: center; align-items: flex-end; padding-bottom: 8px;
+}
+.answer-slider-hint {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,.78); font-size: 10px; white-space: nowrap;
+}
+.answer-slider-thumb {
+  touch-action: none; width: 68px !important; height: 68px !important;
+  flex: none; transition: transform .12s cubic-bezier(.22,.9,.32,1);
+}
+.answer-slider-wrap small { margin-top: 8px; }
+@media(max-height:650px){
+  .answer-slider-track{height:112px}
+  .answer-slider-thumb{width:62px!important;height:62px!important}
+}
+:root[data-theme="dark"] .avatar-modal-overlay { background: rgba(2,8,23,.9); }
+
+/* Chat-lock verification also uses a top-corner back arrow, never a bottom
+   text button that can overlap Android's navigation controls. */
+.chat-lock-screen { position: relative; }
+.pin-back-button {
+  position: absolute; top: calc(12px + var(--sc-system-top)); left: 12px;
+  width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
+  color: inherit; background: rgba(15,23,42,.08); z-index: 3;
+}
+:root[data-theme="dark"] .pin-back-button { background: rgba(255,255,255,.10); color: #f1f5f9; }

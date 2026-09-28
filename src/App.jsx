@@ -330,8 +330,8 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
           <PanelHeader title={t('chatLock')} onBack={() => setLockPanel(false)} />
           <div className="pin-page">
             {locked
-              ? <PinPad mode="change" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />
-              : <PinPad mode="set" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} onCancel={() => setLockPanel(false)} />}
+              ? <PinPad mode="change" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} />
+              : <PinPad mode="set" storageKey={chatPinKey(user.uid)} onSuccess={() => setLockPanel(false)} />}
           </div>
           {locked && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearChatPin(user.uid); setLockPanel(false); }}>{t('removeAppLock')}</button>}
         </aside>
@@ -605,9 +605,10 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
 
   if (!chatUnlocked) {
     return (
-      <div className="lock-screen">
+      <div className="lock-screen chat-lock-screen">
+        {onBack && <button type="button" className="pin-back-button" onClick={onBack} aria-label={t('back')}><ArrowLeft size={22} /></button>}
         <Avatar user={user} size="lg" />
-        <PinPad mode="verify" storageKey={chatPinKey(user.uid)} onSuccess={() => setChatUnlocked(true)} onCancel={onBack} />
+        <PinPad mode="verify" storageKey={chatPinKey(user.uid)} onSuccess={() => setChatUnlocked(true)} />
       </div>
     );
   }
@@ -794,19 +795,50 @@ function MiniCallPill({ name, duration, onRestore }) {
 function IncomingVoiceCall({ call, onAccept, onDecline }) {
   const { t } = usePrefs();
   const peer = call.peer || { uid: call.callerId, name: 'School Chat' };
+  const [dragY, setDragY] = useState(0);
+  const dragRef = useRef(null);
+  const maxDrag = 94;
+  function down(e) {
+    dragRef.current = { startY: e.clientY };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }
+  function move(e) {
+    if (!dragRef.current) return;
+    const delta = Math.max(0, Math.min(maxDrag, dragRef.current.startY - e.clientY));
+    setDragY(delta);
+  }
+  function up(e) {
+    if (!dragRef.current) return;
+    const finalDrag = Math.max(0, Math.min(maxDrag, dragRef.current.startY - e.clientY));
+    const accepted = finalDrag >= 62;
+    dragRef.current = null;
+    setDragY(0);
+    if (accepted) onAccept(call);
+  }
   return (
     <div className="voice-overlay call2">
       <div className="call2-bg" />
-      <div className="call2-body">
+      <div className="call2-body incoming-call-body">
         <div className="call2-top"><span className="call2-badge"><Phone size={13} /> {t('incomingVoiceCall')}</span></div>
         <div className="call2-center">
           <div className="call2-avatar ring"><CallAvatar user={peer} /></div>
           <b className="call2-name">{peer.name}</b>
           <span className="call2-status">School Chat</span>
         </div>
-        <div className="call2-actions two">
-          <div className="call2-act"><button className="call2-btn decline" onClick={() => onDecline(call)}><PhoneOff size={28} /></button><small>{t('decline')}</small></div>
-          <div className="call2-act"><button className="call2-btn accept" onClick={() => onAccept(call)}><Phone size={28} /></button><small>{t('accept')}</small></div>
+        <div className="incoming-call-actions">
+          <div className="call2-act decline-wrap"><button className="call2-btn decline" onClick={() => onDecline(call)}><PhoneOff size={28} /></button><small>{t('decline')}</small></div>
+          <div className="call2-act answer-slider-wrap">
+            <div className="answer-slider-track">
+              <span className="answer-slider-hint">{t('accept')}</span>
+              <button
+                className="call2-btn accept answer-slider-thumb"
+                style={{ transform: `translateY(-${dragY}px)` }}
+                onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+                aria-label={t('accept')}
+              ><Phone size={28} /></button>
+            </div>
+            <small>{t('accept')}</small>
+          </div>
         </div>
       </div>
     </div>
@@ -908,6 +940,7 @@ function ActiveVoiceCall({ call, remoteStream, muted, onToggleMute, onHangUp }) 
 function AppShell({ me, profile }) {
   const { t, lang, background } = usePrefs();
   const [users, setUsers] = useState([]);
+  const [contactsReady, setContactsReady] = useState(false);
   const [knownContacts, setKnownContacts] = useState({});
   const contactDeleteBackup = useRef({});
   const [adminUid, setAdminUid] = useState(null);
@@ -962,8 +995,14 @@ function AppShell({ me, profile }) {
 
   useEffect(() => {
     if (profile.role === 'admin') return undefined; // admin uses its own full-list read, below
-    const stops = visibleUids.map(uid => onValue(ref(db, `users/${uid}`), s => {
+    const expected = [...visibleUids];
+    const loaded = new Set();
+    setUsers([]);
+    setContactsReady(expected.length === 0);
+    if (!expected.length) return undefined;
+    const stops = expected.map(uid => onValue(ref(db, `users/${uid}`), s => {
       const val = s.val();
+      loaded.add(uid);
       // Skip accounts that never finished profile setup (no name yet) --
       // otherwise a phone-contact match that signed up but hit "Skip for
       // now" would show up here as a nameless "?" contact.
@@ -972,6 +1011,10 @@ function AppShell({ me, profile }) {
         const rest = prev.filter(u => u.uid !== uid);
         return usable ? [...rest, { uid, ...val }] : rest;
       });
+      if (loaded.size >= expected.length) setContactsReady(true);
+    }, () => {
+      loaded.add(uid);
+      if (loaded.size >= expected.length) setContactsReady(true);
     }));
     return () => stops.forEach(stop => stop && stop());
   }, [visibleUids, profile.role]);
@@ -984,7 +1027,8 @@ function AppShell({ me, profile }) {
     return onValue(ref(db, 'users'), s => {
       const all = s.val() || {};
       setUsers(Object.entries(all).map(([uid, u]) => ({ uid, ...u })).filter(u => u.uid !== me.uid));
-    });
+      setContactsReady(true);
+    }, () => setContactsReady(true));
   }, [me.uid, profile.role]);
 
   // Quiet, background match: phone contacts -> registered numbers -> saved
@@ -1205,17 +1249,25 @@ function AppShell({ me, profile }) {
         )}
 
         <div className="section-title"><h3>{t('yourContacts')}</h3><span>{users.filter(u => u.online).length} {t('online')}</span></div>
-        {filtered.map(u => {
-          const subtitle = u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang);
-          return (
-            <ContactRow key={u.uid} u={u} subtitle={subtitle} statusUids={statusUids}
-              unread={unread[chatIdFor(me.uid, u.uid)]}
-              onOpenStatus={() => { setStatusStart(0); setStatusOwner(u); }} onOpenChat={() => setChatUser(u)}
-              onLongPress={() => setContactAction(u)}
-            />
-          );
-        })}
-        {!filtered.length && <div className="empty"><Users size={38} /><p>{t('noUsersFound')}</p></div>}
+        {!contactsReady ? (
+          <div className="contacts-skeleton" aria-hidden="true">
+            {Array.from({ length: 5 }).map((_, i) => <div className="contact-skeleton-row" key={i}><span className="contact-skeleton-avatar" /><span className="contact-skeleton-lines"><i /><i /></span></div>)}
+          </div>
+        ) : (
+          <>
+            {filtered.map(u => {
+              const subtitle = u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang);
+              return (
+                <ContactRow key={u.uid} u={u} subtitle={subtitle} statusUids={statusUids}
+                  unread={unread[chatIdFor(me.uid, u.uid)]}
+                  onOpenStatus={() => { setStatusStart(0); setStatusOwner(u); }} onOpenChat={() => setChatUser(u)}
+                  onLongPress={() => setContactAction(u)}
+                />
+              );
+            })}
+            {!filtered.length && <div className="empty"><Users size={38} /><p>{t('noUsersFound')}</p></div>}
+          </>
+        )}
       </main>
       {contactAction && (
         <ContactActionSheet
@@ -1509,7 +1561,7 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   </>;
   else if (panel === 'applock') panelContent = <>
     <PanelHeader title={t('appLock')} onBack={() => setPanel('main')} />
-    <div className="pin-page"><PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} onCancel={() => setPanel('main')} /></div>
+    <div className="pin-page"><PinPad mode={isPinSet() ? 'change' : 'set'} onSuccess={() => setPanel('main')} /></div>
     {isPinSet() && <button className="link" style={{ margin: '10px auto' }} onClick={() => { clearPin(); setPanel('main'); }}>{t('removeAppLock')}</button>}
   </>;
   else if (panel === 'update') panelContent = <>

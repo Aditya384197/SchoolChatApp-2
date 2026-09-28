@@ -41,9 +41,7 @@ public class AudioRouterPlugin extends Plugin {
                     if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) speaker = true;
                 }
                 AudioDeviceInfo current = audio.getCommunicationDevice();
-                if (current != null && current.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    speaker = true;
-                }
+                if (current != null && current.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) speaker = true;
             } else {
                 bluetooth = audio.isBluetoothA2dpOn() || audio.isBluetoothScoOn();
                 speaker = audio.isSpeakerphoneOn();
@@ -63,15 +61,10 @@ public class AudioRouterPlugin extends Plugin {
             call.reject("Audio service unavailable");
             return;
         }
-
         try {
             audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            boolean applied;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                applied = applyModernRoute(audio, route);
-            } else {
-                applied = applyLegacyRoute(audio, route);
-            }
+            boolean applied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    ? applyModernRoute(audio, route) : applyLegacyRoute(audio, route);
             if (!applied) {
                 call.reject("Requested audio route is not available.");
                 return;
@@ -92,14 +85,17 @@ public class AudioRouterPlugin extends Plugin {
             stopRingingInternal();
             AudioManager audio = audioManager();
             if (audio != null) audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            ringTone = new ToneGenerator(AudioManager.STREAM_VOICE_CALL, 88);
+            // Dedicated network-call ring-back cadence: about one second of the
+            // standard supervisor ringtone tone followed by about two seconds
+            // of silence. It never uses the user's personal notification/ringer.
+            ringTone = new ToneGenerator(AudioManager.STREAM_VOICE_CALL, 86);
             ringRunnable = new Runnable() {
                 @Override public void run() {
                     if (ringTone == null) return;
                     try {
-                        ringTone.startTone(ToneGenerator.TONE_SUP_RINGTONE, 650);
+                        ringTone.startTone(ToneGenerator.TONE_SUP_RINGTONE, 1000);
                     } catch (Exception ignored) {}
-                    ringHandler.postDelayed(this, 1550);
+                    ringHandler.postDelayed(this, 3000);
                 }
             };
             ringRunnable.run();
@@ -137,10 +133,7 @@ public class AudioRouterPlugin extends Plugin {
     @PluginMethod
     public void clearRoute(PluginCall call) {
         AudioManager audio = audioManager();
-        if (audio == null) {
-            call.resolve();
-            return;
-        }
+        if (audio == null) { call.resolve(); return; }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 audio.clearCommunicationDevice();
@@ -148,7 +141,7 @@ public class AudioRouterPlugin extends Plugin {
                 audio.setSpeakerphoneOn(false);
                 if (audio.isBluetoothScoOn()) {
                     audio.setBluetoothScoOn(false);
-                    try { audio.stopBluetoothSco(); } catch (Exception ignored) { }
+                    try { audio.stopBluetoothSco(); } catch (Exception ignored) {}
                 }
                 audio.setMode(AudioManager.MODE_NORMAL);
             }
@@ -166,19 +159,12 @@ public class AudioRouterPlugin extends Plugin {
 
     private void setRouteDirect(String route, PluginCall call) {
         AudioManager audio = audioManager();
-        if (audio == null) {
-            call.reject("Audio service unavailable");
-            return;
-        }
+        if (audio == null) { call.reject("Audio service unavailable"); return; }
         try {
             audio.setMode(AudioManager.MODE_IN_COMMUNICATION);
             boolean applied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                    ? applyModernRoute(audio, route)
-                    : applyLegacyRoute(audio, route);
-            if (!applied) {
-                call.reject("Requested audio route is not available.");
-                return;
-            }
+                    ? applyModernRoute(audio, route) : applyLegacyRoute(audio, route);
+            if (!applied) { call.reject("Requested audio route is not available."); return; }
             JSObject result = new JSObject();
             result.put("enabled", "speaker".equals(route));
             call.resolve(result);
@@ -188,17 +174,11 @@ public class AudioRouterPlugin extends Plugin {
     }
 
     private static boolean applyModernRoute(AudioManager audio, String route) {
-        if ("earpiece".equals(route)) {
-            return applyDeviceType(audio, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE);
-        }
-        if ("speaker".equals(route)) {
-            return applyDeviceType(audio, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
-        }
+        if ("earpiece".equals(route)) return applyDeviceType(audio, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE);
+        if ("speaker".equals(route)) return applyDeviceType(audio, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
         if ("bluetooth".equals(route)) {
             for (AudioDeviceInfo device : audio.getAvailableCommunicationDevices()) {
-                if (isBluetoothDevice(device.getType()) && audio.setCommunicationDevice(device)) {
-                    return true;
-                }
+                if (isBluetoothDevice(device.getType()) && audio.setCommunicationDevice(device)) return true;
             }
             return false;
         }
@@ -215,13 +195,13 @@ public class AudioRouterPlugin extends Plugin {
     private static boolean applyLegacyRoute(AudioManager audio, String route) {
         if ("speaker".equals(route)) {
             audio.setBluetoothScoOn(false);
-            try { audio.stopBluetoothSco(); } catch (Exception ignored) { }
+            try { audio.stopBluetoothSco(); } catch (Exception ignored) {}
             audio.setSpeakerphoneOn(true);
             return true;
         }
         if ("earpiece".equals(route)) {
             audio.setBluetoothScoOn(false);
-            try { audio.stopBluetoothSco(); } catch (Exception ignored) { }
+            try { audio.stopBluetoothSco(); } catch (Exception ignored) {}
             audio.setSpeakerphoneOn(false);
             return true;
         }
@@ -236,12 +216,8 @@ public class AudioRouterPlugin extends Plugin {
     }
 
     private static boolean isBluetoothDevice(int type) {
-        if (type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
-            return true;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == AudioDeviceInfo.TYPE_BLE_HEADSET) {
-            return true;
-        }
+        if (type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && type == AudioDeviceInfo.TYPE_BLE_HEADSET) return true;
         return type == AudioDeviceInfo.TYPE_HEARING_AID;
     }
 }
