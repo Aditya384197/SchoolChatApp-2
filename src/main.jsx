@@ -33,6 +33,8 @@ async function syncSystemInsets() {
   root.style.setProperty('--sc-system-top', `${systemTop}px`);
   root.style.setProperty('--sc-system-bottom', `${systemBottom}px`);
   root.style.setProperty('--sc-bottom-safe', `${bottomSafe}px`);
+  root.style.setProperty('--sc-system-left', `${Math.max(0, Number(native?.left) || 0) / dpr}px`);
+  root.style.setProperty('--sc-system-right', `${Math.max(0, Number(native?.right) || 0) / dpr}px`);
 }
 
 if (typeof window !== 'undefined') {

@@ -811,3 +811,46 @@ body { overflow:hidden; }
 
 /* The composer should never animate from the top when a chat screen mounts. */
 .chat-screen { animation: slideInRight .16s cubic-bezier(.22,.9,.32,1) !important; }
+
+/* v1.8.1: universal system-inset guard.
+   The Android window is edge-to-edge. Every fixed sheet/full-screen page must
+   keep interactive controls out of the status/navigation touch regions. */
+:root{--sc-system-left:0px;--sc-system-right:0px}
+.screen{padding-left:var(--sc-system-left);padding-right:var(--sc-system-right)}
+.topbar{padding-left:max(15px,calc(15px + var(--sc-system-left)));padding-right:max(15px,calc(15px + var(--sc-system-right)))}
+.content{padding-bottom:calc(16px + var(--sc-bottom-safe))}
+.tab-bar{margin-left:var(--sc-system-left);margin-right:var(--sc-system-right);margin-bottom:var(--sc-bottom-safe)}
+.drawer,.settings-drawer{height:100%;box-sizing:border-box;padding-bottom:max(18px,var(--sc-bottom-safe))}
+.overlay,.msg-actions,.info-overlay,.source-overlay,.avatar-modal-overlay,.crop-overlay,.status-composer-overlay,.logout-confirm{padding-top:var(--sc-system-top);padding-bottom:var(--sc-bottom-safe);box-sizing:border-box}
+.avatar-modal-overlay{align-items:flex-end}
+.avatar-modal{max-height:min(88dvh,calc(100dvh - var(--sc-system-top) - var(--sc-bottom-safe) - 16px));box-sizing:border-box}
+.avatar-modal-scroll{max-height:calc(100dvh - var(--sc-system-top) - var(--sc-bottom-safe) - 92px);padding-bottom:max(12px,var(--sc-bottom-safe))}
+.pin-page{min-height:0;flex:1 1 auto;padding-bottom:var(--sc-bottom-safe);box-sizing:border-box}
+.pin-page .pin-pad{padding-bottom:max(12px,var(--sc-bottom-safe))}
+.lock-screen{min-height:100%;height:100%;padding-top:calc(30px + var(--sc-system-top));padding-bottom:max(22px,var(--sc-bottom-safe));box-sizing:border-box}
+.status-composer-overlay{padding-left:var(--sc-system-left);padding-right:var(--sc-system-right)}
+.status-composer{max-height:min(88dvh,calc(100dvh - var(--sc-system-top) - var(--sc-bottom-safe) - 10px));margin-bottom:0}
+.source-overlay .source-card,.info-overlay .message-info,.msg-actions .sheet{margin-bottom:0;padding-bottom:max(18px,var(--sc-bottom-safe))}
+.media-viewer,.status-viewer,.call2{padding-top:var(--sc-system-top);padding-bottom:var(--sc-bottom-safe);box-sizing:border-box}
+.media-viewer-back{top:calc(10px + var(--sc-system-top))}
+.media-viewer-caption{padding-bottom:max(20px,calc(20px + var(--sc-bottom-safe)))}
+.call2-body{padding-top:calc(14px + var(--sc-system-top));padding-bottom:max(30px,calc(30px + var(--sc-bottom-safe)))}
+.mini-call-pill.corner-bl,.mini-call-pill.corner-br{bottom:calc(16px + var(--sc-bottom-safe))}
+.mini-call-pill.corner-tl,.mini-call-pill.corner-tr{top:calc(14px + var(--sc-system-top))}
+.status-bars{top:calc(10px + var(--sc-system-top))}
+.status-top{top:calc(18px + var(--sc-system-top))}
+.status-footer{padding-bottom:max(14px,calc(14px + var(--sc-bottom-safe)))}
+.ve-top{padding-top:calc(10px + var(--sc-system-top))}
+.ve-panel{padding-bottom:max(14px,calc(14px + var(--sc-bottom-safe)))}
+.chat-screen .composer{margin-bottom:0!important;padding-bottom:max(9px,calc(9px + var(--sc-bottom-safe)))}
+.chat-screen .messages{padding-bottom:12px}
+.scroll-bottom{bottom:calc(78px + var(--sc-bottom-safe))}
+.admin-title{position:relative}
+.admin-settings-button{margin-left:auto}
+.admin-more{width:100%;margin:10px 0 6px;padding:10px 12px;border-radius:12px;background:#eef6ff;color:#0f5fc4;font-weight:700;border:1px solid #bfdbfe}
+.admin-log-text{display:inline-block;margin-left:4px;vertical-align:top;white-space:pre-wrap;word-break:break-word}
+.admin-log-media{display:block;width:min(280px,78vw);margin:8px 0 4px;padding:0;border:0;border-radius:14px;overflow:hidden;background:#0f172a}
+.admin-log-media img{display:block;width:100%;max-height:300px;object-fit:contain}
+.admin-log-media .video-thumb{width:100%}
+:root[data-theme="dark"] .admin-more{background:#172554;color:#bfdbfe;border-color:#1e3a8a}
+:root[data-theme="dark"] .admin-log-media{background:#020617}

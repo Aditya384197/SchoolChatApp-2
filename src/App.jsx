@@ -21,7 +21,7 @@ import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification, listenNotificationActions } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
 import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
-import { usePrefs, localeFor, LANGUAGES } from './context/Prefs';
+import { usePrefs, localeFor, LANGUAGES, backgroundPatternStyle } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus, listenActiveStatusOwners, listenStatus, MAX_ACTIVE_STATUS } from './lib/status';
 import { MediaViewer, ChatImage, VideoThumb } from './components/MediaViewer';
@@ -1583,21 +1583,33 @@ function AdminPanel({ users, me }) {
   const [mirrors, setMirrors] = useState({});
   const [query, setQuery] = useState('');
   const [removing, setRemoving] = useState(null);
+  const [showAdminSettings, setShowAdminSettings] = useState(false);
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const [viewerMedia, setViewerMedia] = useState(null);
   const [, forceTick] = useState(0);
 
-  useBackHandler(removing ? () => setRemoving(null) : (selectedChat ? () => setSelectedChat(null) : null));
+  useBackHandler(removing
+    ? () => setRemoving(null)
+    : viewerMedia
+      ? () => setViewerMedia(null)
+      : selectedChat
+        ? () => setSelectedChat(null)
+        : null);
 
   useEffect(() => onValue(ref(db, 'adminMirror'), s => setMirrors(s.val() || {})), []);
   useEffect(() => {
     if (!selectedChat) { setLogs([]); return undefined; }
     return onValue(ref(db, `adminMirror/${selectedChat}/messages`), s => {
       const d = s.val() || {};
-      setLogs(Object.entries(d).map(([id, m]) => ({ id, ...m })).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
+      setLogs(Object.entries(d)
+        .map(([id, m]) => ({ id, ...m }))
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
     });
   }, [selectedChat]);
-  // Re-render every 30s so "active right now" and last-seen labels stay fresh
-  // without needing a page reload.
-  useEffect(() => { const t = setInterval(() => forceTick(x => x + 1), 30000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    const timer = setInterval(() => forceTick(x => x + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   function confirmRemove(u) { setRemoving(u); }
   async function doRemove() {
@@ -1606,16 +1618,31 @@ function AdminPanel({ users, me }) {
     setRemoving(null);
   }
 
-  const ACTIVE_WINDOW = 3 * 60 * 1000; // "chatting right now" = a message in the last 3 minutes
+  const ACTIVE_WINDOW = 3 * 60 * 1000;
   const now = Date.now();
-  const mirroredChats = Object.keys(mirrors).sort((a, b) => (mirrors[b]?.lastMessageAt || 0) - (mirrors[a]?.lastMessageAt || 0));
-  const activeChatsNow = mirroredChats.filter(id => now - (mirrors[id]?.lastMessageAt || 0) < ACTIVE_WINDOW).length;
+  const mirroredChats = Object.keys(mirrors)
+    .sort((a, b) => (mirrors[b]?.lastMessageAt || 0) - (mirrors[a]?.lastMessageAt || 0));
+  const activeChatsNow = mirroredChats
+    .filter(id => now - (mirrors[id]?.lastMessageAt || 0) < ACTIVE_WINDOW).length;
   const onlineNow = users.filter(u => u.online).length;
 
   const q = query.trim().toLowerCase();
-  const chatLabel = (chatId) => chatId.split('_').map(uid => uid === me.uid ? t('you') : users.find(u => u.uid === uid)?.name || t('user')).join(' ↔ ');
-  const filteredUsers = q ? users.filter(u => (u.name || '').toLowerCase().includes(q) || (u.phone || '').includes(q) || (u.email || '').toLowerCase().includes(q)) : users;
-  const filteredChats = q ? mirroredChats.filter(id => chatLabel(id).toLowerCase().includes(q) || (mirrors[id]?.lastMessage || '').toLowerCase().includes(q)) : mirroredChats;
+  const chatLabel = chatId => chatId.split('_')
+    .map(uid => uid === me.uid
+      ? { uid, name: t('you') }
+      : users.find(u => u.uid === uid) || { uid, name: t('user') })
+    .map(u => u.name)
+    .join(' ↔ ');
+  const filteredUsers = q
+    ? users.filter(u => (u.name || '').toLowerCase().includes(q)
+      || (u.phone || '').includes(q)
+      || (u.email || '').toLowerCase().includes(q))
+    : users;
+  const filteredChats = q
+    ? mirroredChats.filter(id => chatLabel(id).toLowerCase().includes(q)
+      || (mirrors[id]?.lastMessage || '').toLowerCase().includes(q))
+    : mirroredChats;
+  const memberList = showAllMembers ? filteredUsers : filteredUsers.slice(0, 6);
 
   if (selectedChat) {
     return (
@@ -1625,18 +1652,78 @@ function AdminPanel({ users, me }) {
           <b className="grow">{chatLabel(selectedChat)}</b>
         </header>
         <div className="content admin-transcript">
-          {logs.length
-            ? logs.map(m => <div className="log" key={m.id}><b>{m.senderId === me.uid ? t('you') : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>: {m.text || (m.type === 'video' ? '🎥 Video' : m.type === 'file' ? `📎 ${m.fileName || 'File'}` : (m.imageUrl || m.fileUrl ? '📷 Image' : ''))}</div>)
-            : <small>{t('noMessagesYet')}</small>}
+          {logs.length ? logs.map(m => {
+            const kind = m.type || (m.imageUrl ? 'image' : 'text');
+            const url = m.fileUrl || m.imageUrl || '';
+            const canViewMedia = (kind === 'image' || kind === 'video')
+              && url.startsWith('https://files.catbox.moe/');
+            return (
+              <div className="log" key={m.id}>
+                <b>{m.senderId === me.uid
+                  ? t('you')
+                  : users.find(u => u.uid === m.senderId)?.name || t('user')}</b>:
+                {m.text && <div className="admin-log-text">{m.text}</div>}
+                {canViewMedia && kind === 'image' && (
+                  <button
+                    type="button"
+                    className="admin-log-media"
+                    onClick={() => setViewerMedia({ kind, url, caption: m.text || '' })}
+                  >
+                    <img src={url} alt="Image attachment" />
+                  </button>
+                )}
+                {canViewMedia && kind === 'video' && (
+                  <button
+                    type="button"
+                    className="admin-log-media"
+                    onClick={() => setViewerMedia({ kind, url, caption: m.text || '' })}
+                  >
+                    <VideoThumb url={url} onOpen={() => setViewerMedia({ kind, url, caption: m.text || '' })} />
+                  </button>
+                )}
+                {!canViewMedia && kind === 'file' && url && (
+                  <a className="message-file" href={url} target="_blank" rel="noopener noreferrer">
+                    📎 {m.fileName || 'File'}
+                  </a>
+                )}
+                {!m.text && !url && (
+                  <span>{kind === 'video'
+                    ? ' 🎥 Video'
+                    : kind === 'image'
+                      ? ' 📷 Image'
+                      : kind === 'file'
+                        ? ` 📎 ${m.fileName || 'File'}`
+                        : ''}</span>
+                )}
+              </div>
+            );
+          }) : <small>{t('noMessagesYet')}</small>}
         </div>
+        {viewerMedia && (
+          <MediaViewer
+            kind={viewerMedia.kind}
+            url={viewerMedia.url}
+            caption={viewerMedia.caption}
+            onClose={() => setViewerMedia(null)}
+          />
+        )}
       </div>
     );
   }
 
   return <div className="admin">
-    <div className="admin-title"><ShieldCheck size={18} /><h3>{t('adminControls')}</h3></div>
-
-    <AdminCodePanel />
+    <div className="admin-title">
+      <ShieldCheck size={18} />
+      <h3>{t('adminControls')}</h3>
+      <button
+        type="button"
+        className="icon admin-settings-button"
+        title="Admin settings"
+        aria-label="Admin settings"
+        onClick={() => setShowAdminSettings(v => !v)}
+      ><SettingsIcon size={18} /></button>
+    </div>
+    {showAdminSettings && <AdminCodePanel />}
 
     <div className="admin-stats">
       <div><b>{users.length}</b><small>{t('totalMembers')}</small></div>
@@ -1645,18 +1732,35 @@ function AdminPanel({ users, me }) {
       <div><b className={activeChatsNow ? 'on' : ''}>{activeChatsNow}</b><small>{t('activeNowLabel')}</small></div>
     </div>
 
-    <div className="search monitor-search"><Search size={17} /><input placeholder={t('monitorSearchPlaceholder')} value={query} onChange={e => setQuery(e.target.value)} /></div>
+    <div className="search monitor-search">
+      <Search size={17} />
+      <input
+        placeholder={t('monitorSearchPlaceholder')}
+        value={query}
+        onChange={e => { setQuery(e.target.value); setShowAllMembers(false); }}
+      />
+    </div>
 
     <h4>{t('allMembers')}</h4>
-    {filteredUsers.map(u => (
+    {memberList.map(u => (
       <div className="monitor-row static" key={u.uid}>
         <Avatar user={u} size="sm" />
-        <span className="grow"><b>{u.name}{u.role === 'admin' ? ' 👑' : ''}</b><small>{u.phone || u.email}</small></span>
-        <span className={`presence-label ${u.online ? 'on' : ''}`}>{u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang)}</span>
+        <span className="grow">
+          <b>{u.name}{u.role === 'admin' ? ' 👑' : ''}</b>
+          <small>{u.phone || u.email}</small>
+        </span>
+        <span className={`presence-label ${u.online ? 'on' : ''}`}>
+          {u.online ? t('online2') : formatLastSeen(u.lastSeen, t, lang)}
+        </span>
         {u.role !== 'admin' && <button className="remove-btn" onClick={() => confirmRemove(u)}>{t('remove2')}</button>}
       </div>
     ))}
     {!filteredUsers.length && <small>{t('noMembersFound')}</small>}
+    {filteredUsers.length > 6 && (
+      <button type="button" className="admin-more" onClick={() => setShowAllMembers(v => !v)}>
+        {showAllMembers ? 'Show fewer members' : `View all members (${filteredUsers.length})`}
+      </button>
+    )}
     {removing && <div className="msg-actions" onClick={() => setRemoving(null)}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
         <p style={{ padding: '4px 20px 10px' }}>{removing.name}{t('removeConfirmPart1')}</p>
@@ -1668,12 +1772,22 @@ function AdminPanel({ users, me }) {
     <h4>{t('allRecordedChats')}</h4>
     {filteredChats.map(chatId => {
       const parts = chatId.split('_');
-      const chatUsers = parts.map(uid => uid === me.uid ? { uid, name: t('you') } : users.find(u => u.uid === uid) || { uid, name: t('user') });
+      const chatUsers = parts.map(uid => uid === me.uid
+        ? { uid, name: t('you') }
+        : users.find(u => u.uid === uid) || { uid, name: t('user') });
       const isActive = now - (mirrors[chatId]?.lastMessageAt || 0) < ACTIVE_WINDOW;
-      return <button className="monitor-row" key={chatId} onClick={() => setSelectedChat(chatId)}>
+      return <button className="monitor-row" key={chatId} onClick={() => {
+        setSelectedChat(chatId);
+        setViewerMedia(null);
+      }}>
         <Avatar user={chatUsers[0]} size="sm" />
-        <span className="grow"><b>{chatUsers.map(u => u.name).join(' ↔ ')}{isActive && <span className="live-dot" title={t('activeRightNow')} />}</b><small>{mirrors[chatId]?.lastMessage || t('noMessage')}</small></span>
-        <small className="mono-time">{mirrors[chatId]?.lastMessageAt ? formatLastSeen(mirrors[chatId].lastMessageAt, t, lang) : ''}</small>
+        <span className="grow">
+          <b>{chatUsers.map(u => u.name).join(' ↔ ')}{isActive && <span className="live-dot" title={t('activeRightNow')} />}</b>
+          <small>{mirrors[chatId]?.lastMessage || t('noMessage')}</small>
+        </span>
+        <small className="mono-time">
+          {mirrors[chatId]?.lastMessageAt ? formatLastSeen(mirrors[chatId].lastMessageAt, t, lang) : ''}
+        </small>
       </button>;
     })}
     {!filteredChats.length && <small>{q ? t('noChatsFoundSearch') : t('noChatsRecorded')}</small>}
