@@ -1,7 +1,7 @@
 import React from 'react';
 import { onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
 import { db } from '../firebase';
-import { chatIdFor } from './chat';
+import { chatIdFor, sendMessage } from './chat';
 import { clearAudioRoute } from './audioRoute';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -238,6 +238,10 @@ export function useVoiceCall({ uid, users }) {
             callerId: uid, callerName: peer.name || 'School Chat', receiverId: peer.uid,
             createdAt: Date.now(), notified: false
           }).catch(() => {});
+          // One note in the shared chat thread -- both sides see it: the
+          // caller as confirmation the call went unanswered, the receiver as
+          // their missed-call record, exactly like a normal chat message.
+          sendMessage(callId, uid, peer.uid, '📞 Missed voice call').catch(() => {});
           finishCall(callId).catch(() => {});
         }
       }, CALL_RING_TIMEOUT_MS);

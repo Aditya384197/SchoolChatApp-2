@@ -122,7 +122,7 @@ export function LockedBubble({ me, chatId, message, onOpenMedia, onGoPrivacy }) 
   async function decrypt() {
     setState('busy'); setErr('');
     try {
-      const { bytes, text, caption } = await unlockPayload({ meUid: me.uid, chatId, messageId: message.id, lock: message.lock, fileUrl: message.fileUrl });
+      const { bytes, text, caption } = await unlockPayload({ meUid: me.uid, senderUid: message.senderId, chatId, messageId: message.id, lock: message.lock, fileUrl: message.fileUrl });
       if (message.lock.kind === 'text') { setContent({ text }); setState('open'); return; }
       const blob = new Blob([bytes], { type: message.lock.mime || 'application/octet-stream' });
       const url = URL.createObjectURL(blob);

@@ -357,8 +357,8 @@ function ChatMenu({ me, user, chatId, messages = [], onClose, onBlocked }) {
   );
 }
 
-function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
-  const { t, lang } = usePrefs();
+function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
+  const { t, lang, background } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
   const [hidden, setHidden] = useState({});
@@ -488,7 +488,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
         if (wasLocked) {
           const prepared = kind === 'image' ? await compressImage(file) : file;
           const bytes = await fileToBytes(prepared);
-          const { lock, cipher } = await lockPayload({ recipientUid: user.uid, chatId, messageId, bytes, caption: value, kind, mime: prepared.type || file.type });
+          const { lock, cipher } = await lockPayload({ senderUid: me.uid, recipientUid: user.uid, chatId, messageId, bytes, caption: value, kind, mime: prepared.type || file.type });
           const uploaded = await uploadEncryptedBytes(cipher, setUploadPct);
           await sendMessage(chatId, me.uid, user.uid, '', {
             type: 'locked', lock, fileUrl: uploaded.url,
@@ -519,7 +519,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
     } else if (lockOn) {
       const messageId = createMessageId(chatId);
       try {
-        const { lock } = await lockPayload({ recipientUid: user.uid, chatId, messageId, bytes: new TextEncoder().encode(value), kind: 'text' });
+        const { lock } = await lockPayload({ senderUid: me.uid, recipientUid: user.uid, chatId, messageId, bytes: new TextEncoder().encode(value), kind: 'text' });
         await sendMessage(chatId, me.uid, user.uid, '', { type: 'locked', lock, messageId });
       } catch {
         setImageError(t('privacyDecryptFailed'));
@@ -628,7 +628,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
           onBlocked={onBack}
         />
       )}
-      <div className="messages" ref={listRef} onScroll={handleScroll}>
+      <div className="messages" ref={listRef} onScroll={handleScroll} style={backgroundPatternStyle(background)}>
         {activeDate&&<div className="chat-date-chip">{activeDate}</div>}
         {visibleMessages.map(m => (
           <MessageBubble
@@ -637,7 +637,7 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy }) {
             onLongPress={msg => setSelectedIds(new Set([msg.id]))}
             selectionMode={selectionMode} selected={selectedIds.has(m.id)} onToggleSelect={toggleSelect}
             onOpenMedia={setViewerMedia}
-            onGoPrivacy={() => { setShowChatMenu(false); setLockPanel2(true); }}
+            onGoPrivacy={() => { setShowChatMenu(false); onGoPrivacy?.(); }}
           />
         ))}
         {otherTyping && <div className="typing-bubble"><span></span><span></span><span></span></div>}
@@ -908,6 +908,8 @@ function AppShell({ me, profile }) {
   const [chatUser, setChatUser] = useState(null);
   const [contactAction, setContactAction] = useState(null);
   const [settings, setSettings] = useState(false);
+  const [settingsInitialPanel, setSettingsInitialPanel] = useState('main');
+  const goPrivacy = () => { setChatUser(null); setSettingsInitialPanel('privacy'); setSettings(true); };
   const [unread, setUnread] = useState({});
   const [previews, setPreviews] = useState({});
   const [notificationsReady, setNotificationsReady] = useState(false);
@@ -1132,7 +1134,7 @@ function AppShell({ me, profile }) {
   );
 
   if (chatUser) return (<>
-    <Chat me={me} user={chatUser} onBack={() => setChatUser(null)} onStartVoiceCall={voiceCall.startCall} callBusy={Boolean(voiceCall.activeCall || voiceCall.incomingCall)} />
+    <Chat me={me} user={chatUser} onBack={() => setChatUser(null)} onStartVoiceCall={voiceCall.startCall} callBusy={Boolean(voiceCall.activeCall || voiceCall.incomingCall)} onGoPrivacy={goPrivacy} />
     {callUi}
   </>);
 
@@ -1202,11 +1204,12 @@ function AppShell({ me, profile }) {
       )}
       {settings && <SettingsDrawer
         me={me} profile={profile} adminUser={adminUser}
-        onClose={() => setSettings(false)} onOpenChat={setChatUser}
+        onClose={() => { setSettings(false); setSettingsInitialPanel('main'); }} onOpenChat={setChatUser}
         onOpenAdmin={() => { setSettings(false); setView('admin'); }}
         onOpenMyStatus={(i = 0) => { setStatusStart(i); setStatusOwner({ ...profile, uid: me.uid }); }}
         onAddStatus={() => setComposing(true)}
         hasMyStatus={statusUids.has(me.uid)}
+        initialPanel={settingsInitialPanel}
       />}
       {statusOwner && <StatusViewer key={statusOwner.uid} owner={statusOwner} me={me} startIndex={statusStart} onClose={() => setStatusOwner(null)} />}
       {composing && <StatusComposer me={me} onClose={() => setComposing(false)} />}
@@ -1464,7 +1467,18 @@ function SettingsDrawer({ me, profile, adminUser, onClose, onOpenChat, onOpenAdm
   </>;
   else if (panel === 'background') panelContent = <>
     <PanelHeader title={t('background')} onBack={() => setPanel('main')} />
-    <div className="theme-options background-options">{['none','dots','grid','waves','diagonal'].map(x=><button key={x} className={background===x?'active':''} onClick={()=>{setBackground(x);setPanel('main')}}>{x==='none'?t('backgroundNone'):x==='dots'?t('backgroundDots'):x==='grid'?t('backgroundGrid'):x==='waves'?t('backgroundWaves'):t('backgroundDiagonal')}</button>)}</div>
+    <p className="muted small">{t('backgroundPickHint')}</p>
+    <div className="background-grid">
+      {['none', 'dots', 'grid', 'waves', 'diagonal'].map(x => (
+        <button key={x} className={`background-choice ${background === x ? 'active' : ''}`} onClick={() => { setBackground(x); setPanel('main'); }}>
+          <span className="background-preview" style={backgroundPatternStyle(x)}>
+            <span className="background-preview-bubble mine" />
+            <span className="background-preview-bubble theirs" />
+          </span>
+          <b>{x === 'none' ? t('backgroundNone') : x === 'dots' ? t('backgroundDots') : x === 'grid' ? t('backgroundGrid') : x === 'waves' ? t('backgroundWaves') : t('backgroundDiagonal')}</b>
+        </button>
+      ))}
+    </div>
   </>;
   else if (panel === 'privacy') panelContent = <>
     <PanelHeader title={t('privacy')} onBack={() => setPanel('main')} />

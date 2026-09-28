@@ -1,7 +1,9 @@
 import {
   increment,
+  limitToLast,
   onValue,
   push,
+  query,
   ref,
   serverTimestamp,
   set,
@@ -11,8 +13,12 @@ import { db } from '../firebase';
 
 export const chatIdFor = (a, b) => [a, b].sort().join('_');
 
+// How many of the most recent messages stay live-synced. Older history isn't
+// fetched at all on open, which is what made opening a long chat feel slow.
+const LIVE_MESSAGE_WINDOW = 80;
+
 export function listenMessages(chatId, callback) {
-  const r = ref(db, `chats/${chatId}/messages`);
+  const r = query(ref(db, `chats/${chatId}/messages`), limitToLast(LIVE_MESSAGE_WINDOW));
   return onValue(r, (snap) => {
     const data = snap.val() || {};
     const list = Object.entries(data)
@@ -41,7 +47,7 @@ export async function sendMessage(chatId, senderId, receiverId, text = '', optio
 
   const messageId = options.messageId || createMessageId(chatId);
   const createdAt = serverTimestamp();
-  const locked = attachmentType === 'text' && options.type === 'locked';
+  const locked = options.type === 'locked'; // gate on the caller's actual intent, not the derived attachment kind
   const msg = {
     senderId,
     receiverId,

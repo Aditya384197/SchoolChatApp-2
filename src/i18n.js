@@ -3,6 +3,7 @@
 // translated (that's real content/data, not interface copy).
 export const translations = {
   hi: {
+    backgroundPickHint: "चुनें कि होम पेज और चैट में बैकग्राउंड कैसा दिखेगा।",
     privacy: "प्राइवेसी", privacyHint: "यहाँ अपनी 'प्राइवेसी की' बनाएं ताकि दूसरे आपके लिए मैसेज/फाइल लॉक करके भेज सकें, और आप लॉक हुए मैसेज खोल सकें। इसके लिए एक अलग पासवर्ड चाहिए।", privacyPasswordNew: "नया प्राइवेसी पासवर्ड",
     privacyPasswordOld: "पुराना प्राइवेसी पासवर्ड", privacyPasswordEnter: "प्राइवेसी पासवर्ड डालें", privacyPasswordShort: "पासवर्ड कम से कम 6 अक्षर का होना चाहिए और दोनों बार एक जैसा होना चाहिए।",
     privacyCreate: "प्राइवेसी की बनाएं", privacyUnlock: "अनलॉक करें", privacyUnlocked: "आपकी प्राइवेसी की अनलॉक है (कुछ मिनट के लिए)",
@@ -78,6 +79,7 @@ export const translations = {
     langMarathi: "मराठी", langPunjabi: "ਪੰਜਾਬੀ",
   },
   en: {
+    backgroundPickHint: "Pick how the background looks on the home page and inside chats.",
     privacy: "Privacy", privacyHint: "Create your Privacy Key here so others can lock messages/files for you, and you can open locked messages. It needs its own password.", privacyPasswordNew: "New Privacy Password",
     privacyPasswordOld: "Old Privacy Password", privacyPasswordEnter: "Enter Privacy Password", privacyPasswordShort: "Password must be at least 6 characters and match both times.",
     privacyCreate: "Create Privacy Key", privacyUnlock: "Unlock", privacyUnlocked: "Your Privacy Key is unlocked (for a few minutes)",
@@ -147,6 +149,7 @@ export const translations = {
     langMarathi: "मराठी", langPunjabi: "ਪੰਜਾਬੀ",
   },
   te: {
+    backgroundPickHint: "హోమ్ పేజీ మరియు చాట్‌లలో బ్యాక్‌గ్రౌండ్ ఎలా కనిపిస్తుందో ఎంచుకోండి.",
     privacy: "ప్రైవసీ", privacyHint: "ఇతరులు మీ కోసం సందేశాలు/ఫైళ్లు లాక్ చేసి పంపేలా, మరియు మీరు లాక్ చేసిన సందేశాలను తెరిచేలా ఇక్కడ మీ ప్రైవసీ కీని సృష్టించండి. దీనికి ప్రత్యేక పాస్‌వర్డ్ కావాలి.", privacyPasswordNew: "కొత్త ప్రైవసీ పాస్‌వర్డ్",
     privacyPasswordOld: "పాత ప్రైవసీ పాస్‌వర్డ్", privacyPasswordEnter: "ప్రైవసీ పాస్‌వర్డ్ నమోదు చేయండి", privacyPasswordShort: "పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి మరియు రెండుసార్లు సరిపోలాలి.",
     privacyCreate: "ప్రైవసీ కీ సృష్టించండి", privacyUnlock: "అన్‌లాక్", privacyUnlocked: "మీ ప్రైవసీ కీ అన్‌లాక్ అయింది (కొన్ని నిమిషాలు)",
@@ -218,6 +221,7 @@ export const translations = {
     myStatus: "నా స్టేటస్",
   },
   mr: {
+    backgroundPickHint: "होम पेज आणि चॅटमध्ये बॅकग्राउंड कसे दिसेल ते निवडा.",
     privacy: "गोपनीयता", privacyHint: "इतरांना तुमच्यासाठी संदेश/फाइल लॉक करून पाठवता याव्यात आणि तुम्ही लॉक केलेले संदेश उघडू शकावेत यासाठी इथे तुमची प्रायव्हसी की तयार करा. यासाठी वेगळा पासवर्ड लागतो.", privacyPasswordNew: "नवीन प्रायव्हसी पासवर्ड",
     privacyPasswordOld: "जुना प्रायव्हसी पासवर्ड", privacyPasswordEnter: "प्रायव्हसी पासवर्ड टाका", privacyPasswordShort: "पासवर्ड किमान 6 अक्षरांचा असावा आणि दोन्ही वेळा सारखा असावा.",
     privacyCreate: "प्रायव्हसी की तयार करा", privacyUnlock: "अनलॉक करा", privacyUnlocked: "तुमची प्रायव्हसी की अनलॉक आहे (काही मिनिटांसाठी)",
@@ -289,6 +293,7 @@ export const translations = {
     myStatus: "माझे स्टेटस",
   },
   pa: {
+    backgroundPickHint: "ਚੁਣੋ ਕਿ ਹੋਮ ਪੇਜ ਅਤੇ ਚੈਟ ਵਿੱਚ ਬੈਕਗ੍ਰਾਊਂਡ ਕਿਵੇਂ ਦਿਸੇਗਾ।",
     privacy: "ਪਰਦੇਦਾਰੀ", privacyHint: "ਦੂਜੇ ਤੁਹਾਡੇ ਲਈ ਸੁਨੇਹੇ/ਫਾਈਲਾਂ ਲੌਕ ਕਰਕੇ ਭੇਜ ਸਕਣ, ਅਤੇ ਤੁਸੀਂ ਲੌਕ ਕੀਤੇ ਸੁਨੇਹੇ ਖੋਲ੍ਹ ਸਕੋ, ਇਸ ਲਈ ਇੱਥੇ ਆਪਣੀ ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਬਣਾਓ। ਇਸ ਲਈ ਵੱਖਰਾ ਪਾਸਵਰਡ ਚਾਹੀਦਾ ਹੈ।", privacyPasswordNew: "ਨਵਾਂ ਪਰਦੇਦਾਰੀ ਪਾਸਵਰਡ",
     privacyPasswordOld: "ਪੁਰਾਣਾ ਪਰਦੇਦਾਰੀ ਪਾਸਵਰਡ", privacyPasswordEnter: "ਪਰਦੇਦਾਰੀ ਪਾਸਵਰਡ ਪਾਓ", privacyPasswordShort: "ਪਾਸਵਰਡ ਘੱਟੋ-ਘੱਟ 6 ਅੱਖਰਾਂ ਦਾ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ ਅਤੇ ਦੋਵੇਂ ਵਾਰ ਇੱਕੋ ਜਿਹਾ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ।",
     privacyCreate: "ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਬਣਾਓ", privacyUnlock: "ਅਨਲੌਕ ਕਰੋ", privacyUnlocked: "ਤੁਹਾਡੀ ਪਰਦੇਦਾਰੀ ਕੁੰਜੀ ਅਨਲੌਕ ਹੈ (ਕੁਝ ਮਿੰਟਾਂ ਲਈ)",

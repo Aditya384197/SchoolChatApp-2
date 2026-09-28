@@ -132,11 +132,36 @@ export async function getKeyId(uid) {
 
 // ---- lock / unlock a payload -------------------------------------------------
 // bytes: Uint8Array of the text / photo / video. Returns { lock, cipher }.
-export async function lockPayload({ recipientUid, chatId, messageId, bytes, caption = '', kind, mime = '' }) {
+// Wraps `rawKey` so only `uid` can recover it: via ECDH if they already have
+// a Privacy Key, or as a waiting pending-key entry (readable only by that
+// uid, per the database rules) if they don't have one yet.
+async function wrapKeyFor(uid, rawKey, chatId, messageId) {
+  const pubSnap = await get(ref(db, `userPubKeys/${uid}`));
+  if (pubSnap.exists()) {
+    const theirPub = await crypto.subtle.importKey('jwk', JSON.parse(pubSnap.val()), ECDH, false, []);
+    const eph = await crypto.subtle.generateKey(ECDH, true, ['deriveKey']);
+    const wrapKey = await crypto.subtle.deriveKey({ name: 'ECDH', public: theirPub }, eph.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const wrapIv = rand(12);
+    return {
+      mode: 'ecdh',
+      epk: JSON.stringify(await crypto.subtle.exportKey('jwk', eph.publicKey)),
+      wkIv: b64(wrapIv),
+      wk: b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wrapIv }, wrapKey, rawKey)),
+    };
+  }
+  // No Privacy Key yet: the raw key waits for them at pendingKeys/<uid>/...
+  await set(ref(db, `pendingKeys/${uid}/${chatId}/${messageId}`), b64(rawKey));
+  return { mode: 'pending' };
+}
+
+// bytes: Uint8Array of the text / photo / video. Wraps the same AES key
+// separately for BOTH the sender and the recipient, so the sender can also
+// open what they locked and sent later, exactly like the recipient can.
+export async function lockPayload({ senderUid, recipientUid, chatId, messageId, bytes, caption = '', kind, mime = '' }) {
   const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   const iv = rand(12);
   const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes));
-  const lock = { v: 1, kind, iv: b64(iv) };
+  const lock = { v: 2, kind, iv: b64(iv) };
   if (mime) lock.mime = mime;
   if (caption) {
     const capIv = rand(12);
@@ -144,33 +169,26 @@ export async function lockPayload({ recipientUid, chatId, messageId, bytes, capt
     lock.cap = b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: capIv }, key, enc.encode(caption)));
   }
   const rawKey = await crypto.subtle.exportKey('raw', key);
-  const pubSnap = await get(ref(db, `userPubKeys/${recipientUid}`));
-  if (pubSnap.exists()) {
-    const recipientPub = await crypto.subtle.importKey('jwk', JSON.parse(pubSnap.val()), ECDH, false, []);
-    const eph = await crypto.subtle.generateKey(ECDH, true, ['deriveKey']);
-    const wrapKey = await crypto.subtle.deriveKey({ name: 'ECDH', public: recipientPub }, eph.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
-    const wrapIv = rand(12);
-    lock.mode = 'ecdh';
-    lock.epk = JSON.stringify(await crypto.subtle.exportKey('jwk', eph.publicKey));
-    lock.wkIv = b64(wrapIv);
-    lock.wk = b64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wrapIv }, wrapKey, rawKey));
-  } else {
-    // Receiver has not created a Privacy Key yet: the key waits for them.
-    lock.mode = 'pending';
-    await set(ref(db, `pendingKeys/${recipientUid}/${chatId}/${messageId}`), b64(rawKey));
-  }
+  lock.to = await wrapKeyFor(recipientUid, rawKey, chatId, messageId);
+  if (senderUid && senderUid !== recipientUid) lock.from = await wrapKeyFor(senderUid, rawKey, chatId, messageId);
   if (kind === 'text') lock.ct = b64(cipher);
   return { lock, cipher };
 }
 
-export async function unlockPayload({ meUid, chatId, messageId, lock, fileUrl }) {
+export async function unlockPayload({ meUid, senderUid, chatId, messageId, lock, fileUrl }) {
   const session = sessions.get(meUid);
   if (!session || Date.now() > session.until) { const e = new Error('locked'); e.code = 'session-locked'; throw e; }
+  // v2 locks carry a wrap for the recipient (lock.to) and, when the sender
+  // had a Privacy Key at send time, a second one for the sender (lock.from)
+  // -- pick whichever one is actually ours. Older (v1) locks only ever had a
+  // single wrap with no `to`/`from` split; keep reading those the old way.
+  const mine = lock.to || lock.from ? (meUid === senderUid && lock.from ? lock.from : lock.to) : lock;
+  if (!mine) { const e = new Error('key-missing'); e.code = 'key-missing'; throw e; }
   let rawKey;
-  if (lock.mode === 'ecdh') {
-    const epk = await crypto.subtle.importKey('jwk', JSON.parse(lock.epk), ECDH, false, []);
+  if (mine.mode === 'ecdh') {
+    const epk = await crypto.subtle.importKey('jwk', JSON.parse(mine.epk), ECDH, false, []);
     const wrapKey = await crypto.subtle.deriveKey({ name: 'ECDH', public: epk }, session.priv, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
-    rawKey = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(lock.wkIv) }, wrapKey, unb64(lock.wk));
+    rawKey = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(mine.wkIv) }, wrapKey, unb64(mine.wk));
   } else {
     const snap = await get(ref(db, `pendingKeys/${meUid}/${chatId}/${messageId}`));
     if (!snap.exists()) { const e = new Error('key-missing'); e.code = 'key-missing'; throw e; }
