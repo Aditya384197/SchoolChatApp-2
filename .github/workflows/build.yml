@@ -358,6 +358,15 @@ jobs:
           # platform-tools चाहिए; बाकी platform/build-tools Gradle खुद ले लेता है।
           packages: 'platform-tools'
 
+      - name: Preflight native Java source checks
+        run: |
+          test -f native/CatboxUploader/CatboxUploaderPlugin.java
+          grep -q 'import java.io.FileOutputStream;' native/CatboxUploader/CatboxUploaderPlugin.java
+          grep -q 'startRinging' native/AudioRouter/AudioRouterPlugin.java
+          grep -q 'stopRinging' native/AudioRouter/AudioRouterPlugin.java
+          grep -q 'java-version: 21' .github/workflows/build.yml || true
+          echo "Native source preflight passed."
+
       - name: Build debug APK
         working-directory: android
         run: |
