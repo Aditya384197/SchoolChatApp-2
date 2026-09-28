@@ -11,7 +11,7 @@ import {
 import { auth, db, firebaseInitError } from './firebase';
 import { beginRegistration, completeRegistration, login, logout, isBanned, updateOwnProfile, changeUserCode, validateUserId } from './lib/auth';
 import {
-  chatIdFor, clearUnread, listenMessages, markDelivered, markSeen, sendMessage, createMessageId,
+  chatIdFor, clearUnread, listenMessages, ensureChatParticipants, markDelivered, markSeen, sendMessage, createMessageId,
   deleteMessageForMe, deleteMessageForEveryone, listenHidden, DELETE_WINDOW_MS, clearChat
 } from './lib/chat';
 import { getPhoneContacts, matchAndSaveContacts, normalizePhone } from './lib/contacts';
@@ -21,7 +21,7 @@ import { listenTyping, setTyping, startPresence } from './lib/presence';
 import { prepareNotifications, showMessageNotification, listenNotificationActions } from './lib/notifications';
 import { Avatar, AvatarPicker, PhotoPicker, AVATARS } from './components/Profile';
 import { isPinSet, LockScreen, PinPad, clearPin, isChatPinSet, clearChatPin, chatPinKey } from './components/AppLock';
-import { usePrefs, localeFor, LANGUAGES } from './context/Prefs';
+import { usePrefs, localeFor, LANGUAGES, backgroundPatternStyle } from './context/Prefs';
 import { StatusViewer } from './components/StatusViewer';
 import { postStatus, cleanupExpiredStatus, listenActiveStatusOwners, listenStatus, MAX_ACTIVE_STATUS } from './lib/status';
 import { MediaViewer, ChatImage, VideoThumb } from './components/MediaViewer';
@@ -361,6 +361,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
   const { t, lang, background } = usePrefs();
   const chatId = chatIdFor(me.uid, user.uid);
   const [messages, setMessages] = useState([]);
+  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [messagesLoadError, setMessagesLoadError] = useState('');
   const [hidden, setHidden] = useState({});
   const [text, setText] = useState('');
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -392,7 +394,35 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
   function clearSelection() { setSelectedIds(new Set()); }
   useBackHandler(selectionMode ? clearSelection : onBack);
 
-  useEffect(() => listenMessages(chatId, setMessages), [chatId]);
+  useEffect(() => {
+    let cancelled = false;
+    let stop = null;
+    setMessages([]);
+    setMessagesLoading(true);
+    setMessagesLoadError('');
+
+    (async () => {
+      try {
+        // A brand-new direct chat has no participant record yet. Create it
+        // before attaching the message listener; otherwise Firebase rules
+        // correctly reject the read and the chat can look permanently empty.
+        await ensureChatParticipants(chatId, me.uid, user.uid);
+        if (cancelled) return;
+        stop = listenMessages(
+          chatId,
+          list => { if (!cancelled) { setMessages(list); setMessagesLoading(false); setMessagesLoadError(''); } },
+          () => { if (!cancelled) { setMessagesLoading(false); setMessagesLoadError(t('chatLoadError')); } }
+        );
+      } catch (error) {
+        if (!cancelled) {
+          setMessagesLoading(false);
+          setMessagesLoadError(error?.message || t('chatLoadError'));
+        }
+      }
+    })();
+
+    return () => { cancelled = true; if (typeof stop === 'function') stop(); };
+  }, [chatId, me.uid, user.uid]);
   useEffect(() => listenHidden(me.uid, chatId, setHidden), [chatId, me.uid]);
   useEffect(() => listenTyping(chatId, setTypingUsers), [chatId]);
   useEffect(() => {
@@ -629,6 +659,8 @@ function Chat({ me, user, onBack, onStartVoiceCall, callBusy, onGoPrivacy }) {
         />
       )}
       <div className="messages" ref={listRef} onScroll={handleScroll} style={backgroundPatternStyle(background)}>
+        {messagesLoading && !visibleMessages.length && <div className="messages-loading">{t('pleaseWait')}</div>}
+        {messagesLoadError && <div className="messages-load-error">{messagesLoadError}</div>}
         {activeDate&&<div className="chat-date-chip">{activeDate}</div>}
         {visibleMessages.map(m => (
           <MessageBubble
@@ -771,21 +803,6 @@ function MiniCallPill({ name, duration, onRestore }) {
 function IncomingVoiceCall({ call, onAccept, onDecline }) {
   const { t } = usePrefs();
   const peer = call.peer || { uid: call.callerId, name: 'School Chat' };
-  useEffect(() => {
-    let ctx; let timer; let stopped = false;
-    const beep = () => {
-      try {
-        ctx ||= new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator(); const gain = ctx.createGain();
-        osc.frequency.value = 880; gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28);
-        osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.3);
-      } catch {}
-    };
-    beep(); timer = setInterval(() => { if (!stopped) beep(); }, 1200);
-    return () => { stopped = true; clearInterval(timer); try { ctx?.close(); } catch {} };
-  }, []);
   return (
     <div className="voice-overlay call2">
       <div className="call2-bg" />

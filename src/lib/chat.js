@@ -17,7 +17,7 @@ export const chatIdFor = (a, b) => [a, b].sort().join('_');
 // fetched at all on open, which is what made opening a long chat feel slow.
 const LIVE_MESSAGE_WINDOW = 80;
 
-export function listenMessages(chatId, callback) {
+export function listenMessages(chatId, callback, onError) {
   const r = query(ref(db, `chats/${chatId}/messages`), limitToLast(LIVE_MESSAGE_WINDOW));
   return onValue(r, (snap) => {
     const data = snap.val() || {};
@@ -25,6 +25,16 @@ export function listenMessages(chatId, callback) {
       .map(([id, m]) => ({ id, ...m }))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
     callback(list);
+  }, error => {
+    onError?.(error);
+  });
+}
+
+export async function ensureChatParticipants(chatId, senderId, receiverId) {
+  if (!chatId || !senderId || !receiverId || senderId === receiverId) return;
+  await update(ref(db, `chats/${chatId}/participants`), {
+    [senderId]: true,
+    [receiverId]: true,
   });
 }
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { onDisconnect, onValue, push, ref, remove, set, update } from 'firebase/database';
 import { db } from '../firebase';
 import { chatIdFor, sendMessage } from './chat';
-import { clearAudioRoute } from './audioRoute';
+import { clearAudioRoute, startRingtone, stopRingtone } from './audioRoute';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 const CALL_RING_TIMEOUT_MS = 30 * 1000;
@@ -66,6 +66,12 @@ export function useVoiceCall({ uid, users }) {
 
   React.useEffect(() => { activeRef.current = activeCall; }, [activeCall]);
   React.useEffect(() => { incomingRef.current = incomingCall; }, [incomingCall]);
+  React.useEffect(() => {
+    const ringing = Boolean(incomingCall || activeCall?.status === 'ringing');
+    if (ringing) startRingtone();
+    else stopRingtone();
+    return () => { stopRingtone(); };
+  }, [Boolean(incomingCall), activeCall?.status]);
   React.useEffect(() => {
     if (!activeCall?.peer?.uid) return undefined;
     const peerUid = activeCall.peer.uid;

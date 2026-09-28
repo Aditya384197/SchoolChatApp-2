@@ -15,6 +15,8 @@ async function syncSystemInsets() {
   const dpr = Math.max(1, Number(window.devicePixelRatio) || 1);
   const systemTop = Math.max(0, Number(native?.top) || 0) / dpr;
   const systemBottom = Math.max(0, Number(native?.bottom) || 0) / dpr;
+  const systemLeft = Math.max(0, Number(native?.left) || 0) / dpr;
+  const systemRight = Math.max(0, Number(native?.right) || 0) / dpr;
   const nativeIme = Math.max(0, Number(native?.imeBottom) || 0) / dpr;
 
   let keyboardDelta = 0;
@@ -32,6 +34,8 @@ async function syncSystemInsets() {
   const root = document.documentElement;
   root.style.setProperty('--sc-system-top', `${systemTop}px`);
   root.style.setProperty('--sc-system-bottom', `${systemBottom}px`);
+  root.style.setProperty('--sc-system-left', `${systemLeft}px`);
+  root.style.setProperty('--sc-system-right', `${systemRight}px`);
   root.style.setProperty('--sc-bottom-safe', `${bottomSafe}px`);
 }
 

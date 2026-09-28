@@ -791,3 +791,61 @@ body { overflow:hidden; }
 :root[data-theme="dark"] .background-preview { background: #0b1220; border-color: #1e293b; }
 :root[data-theme="dark"] .background-preview-bubble.theirs { background: #1e293b; }
 :root[data-theme="dark"] .background-preview-bubble.mine { background: #14532d; }
+
+
+/* ===== Stability / inset fixes for Android 10+ ===== */
+html, body, #root { overscroll-behavior: none; }
+
+/* The system navigation buttons are transparent in edge-to-edge mode. Reserve
+   their exact height as real layout space instead of letting the last button
+   row occupy the same touch rectangle as Back/Home/Recents. */
+.chat-screen .composer {
+  margin-bottom: var(--sc-bottom-safe, var(--sc-system-bottom, 0px));
+  padding-bottom: 9px;
+}
+.chat-screen .messages { padding-bottom: 12px; }
+.chat-screen .composer input { position: relative; z-index: 2; }
+.chat-screen .composer button { position: relative; z-index: 3; }
+
+/* Keyboard: let Android resize the WebView, then keep the composer inside
+   the resized viewport; do not allow it to slip under the IME. */
+.chat-screen:focus-within .composer { scroll-margin-bottom: 12px; }
+
+/* Status composer/action button must sit above the transparent navigation bar. */
+.status-composer-overlay {
+  padding-top: var(--sc-system-top, 0px);
+  padding-bottom: var(--sc-system-bottom, 0px);
+}
+.status-composer {
+  max-height: calc(92vh - var(--sc-system-top, 0px) - var(--sc-system-bottom, 0px));
+  padding-bottom: 18px;
+}
+.status-publish { margin-bottom: 2px; position: relative; z-index: 4; }
+
+/* Avatar picker: the modal itself gets an explicit top/bottom safety boundary,
+   so the emoji grid can never occupy the clock/battery region or navigation area. */
+.avatar-modal-overlay {
+  padding-top: var(--sc-system-top, 0px);
+  padding-bottom: var(--sc-system-bottom, 0px);
+  backdrop-filter: none;
+}
+.avatar-modal {
+  max-height: calc(100vh - var(--sc-system-top, 0px) - var(--sc-system-bottom, 0px) - 12px);
+}
+.avatar-modal-scroll {
+  max-height: calc(100vh - var(--sc-system-top, 0px) - var(--sc-system-bottom, 0px) - 92px);
+  padding-bottom: 20px;
+}
+
+/* Attachment/status overlays should not blur their own contrast on Android 10. */
+.source-overlay, .info-overlay, .status-confirm { backdrop-filter: none; }
+.source-overlay { padding-bottom: var(--sc-system-bottom, 0px); }
+.source-card { margin-bottom: 0; }
+
+/* Call controls and status footer also stay above transparent navigation. */
+.call2-actions { margin-bottom: var(--sc-system-bottom, 0px); }
+.status-footer { padding-bottom: calc(10px + var(--sc-system-bottom, 0px)); }
+
+/* Prevent a horizontal strip from accepting taps after the WebView has been
+   resized by the keyboard. */
+.composer, .status-publish, .status-footer { touch-action: manipulation; }

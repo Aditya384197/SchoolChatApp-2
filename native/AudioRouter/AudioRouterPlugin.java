@@ -3,6 +3,9 @@ package com.aditya.schoolchat;
 import android.content.Context;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
+import android.media.AudioAttributes;
 import android.os.Build;
 
 import com.getcapacitor.JSObject;
@@ -15,6 +18,7 @@ import java.util.List;
 
 @CapacitorPlugin(name = "AudioRouter")
 public class AudioRouterPlugin extends Plugin {
+    private Ringtone ringtone;
     private AudioManager audioManager() {
         return (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
     }
@@ -80,7 +84,45 @@ public class AudioRouterPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void startRingtone(PluginCall call) {
+        try {
+            stopRingtoneInternal();
+            android.net.Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            Ringtone r = RingtoneManager.getRingtone(getContext(), uri);
+            if (r == null) {
+                call.reject("Default ringtone is unavailable.");
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                r.setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.setLooping(true);
+            ringtone = r;
+            r.play();
+            call.resolve();
+        } catch (Exception e) {
+            ringtone = null;
+            call.reject("Could not start ringtone", e);
+        }
+    }
+
+    @PluginMethod
+    public void stopRingtone(PluginCall call) {
+        stopRingtoneInternal();
+        call.resolve();
+    }
+
+    private synchronized void stopRingtoneInternal() {
+        try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) { }
+        ringtone = null;
+    }
+
+    @PluginMethod
     public void clearRoute(PluginCall call) {
+        stopRingtoneInternal();
         AudioManager audio = audioManager();
         if (audio == null) {
             call.resolve();

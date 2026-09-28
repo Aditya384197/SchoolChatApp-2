@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Play } from 'lucide-react';
 import { useBackHandler } from '../lib/backStack';
-import { videoFirstFrameSrc } from '../lib/media';
+import { getCachedMediaUrl, videoFirstFrameSrc } from '../lib/media';
 
 function fmtDuration(sec) {
   const s = Math.max(0, Math.round(sec || 0));
@@ -16,6 +16,7 @@ function ZoomImage({ url, onClose }) {
   const boxRef = useRef(null);
   const [tf, setTf] = useState({ s: 1, x: 0, y: 0 });
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState(url);
   const [dragging, setDragging] = useState(false);
   const g = useRef({ mode: null, tf: { s: 1, x: 0, y: 0 }, p0: null, dist0: 1, c0: null, lastTap: 0, lastTapPos: null, dy: 0 });
 
@@ -105,10 +106,12 @@ function ZoomImage({ url, onClose }) {
     setTf(limit(s, px - px * s, py - py * s));
   }
 
+  useEffect(() => { let alive = true; getCachedMediaUrl(url, 'image').then(v => { if (alive) setSource(v || url); }).catch(() => {}); return () => { alive = false; }; }, [url]);
+
   return (
     <div ref={boxRef} className="zoom-box" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
       style={{ background: `rgba(0,0,0,${dragging && tf.s <= 1.02 ? Math.max(0.25, 1 - tf.y / 420) : 1})` }}>
-      <img src={url} alt="" draggable={false} onLoad={() => setLoading(false)} onError={() => setLoading(false)}
+      <img src={source} alt="" draggable={false} onLoad={() => setLoading(false)} onError={() => setLoading(false)}
         style={{ transform: `translate(${tf.x}px, ${tf.y}px) scale(${tf.s})`, transition: dragging ? 'none' : 'transform .2s ease' }} />
       {loading && <div className="media-spinner big" />}
     </div>
@@ -117,9 +120,11 @@ function ZoomImage({ url, onClose }) {
 
 function FullVideo({ url }) {
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState(url);
+  useEffect(() => { let alive = true; getCachedMediaUrl(url, 'video').then(v => { if (alive) setSource(v || url); }).catch(() => {}); return () => { alive = false; }; }, [url]);
   return (
     <div className="zoom-box">
-      <video className="viewer-video" src={url} controls autoPlay playsInline preload="auto"
+      <video className="viewer-video" src={source} controls autoPlay playsInline preload="auto"
         onLoadedData={() => setLoading(false)} onWaiting={() => setLoading(true)} onPlaying={() => setLoading(false)} onCanPlay={() => setLoading(false)} />
       {loading && <div className="media-spinner big" />}
     </div>
@@ -142,11 +147,13 @@ export function MediaViewer({ kind, url, caption, onClose }) {
 export function ChatImage({ url, alt, onOpen }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [source, setSource] = useState(url);
   const ref = useRef(null);
-  useEffect(() => { if (ref.current?.complete && ref.current.naturalWidth) setLoading(false); }, []);
+  useEffect(() => { if (ref.current?.complete && ref.current.naturalWidth) setLoading(false); }, [source]);
+  useEffect(() => { let alive = true; setLoading(true); setFailed(false); getCachedMediaUrl(url, 'image').then(v => { if (alive) setSource(v || url); }).catch(() => {}); return () => { alive = false; }; }, [url]);
   return (
     <div className={`msg-media ${loading ? 'is-loading' : ''}`} onClick={onOpen}>
-      {!failed && <img ref={ref} className="message-image" src={url} alt={alt || ''} onLoad={() => setLoading(false)} onError={() => { setLoading(false); setFailed(true); }} />}
+      {!failed && <img ref={ref} className="message-image" src={source} alt={alt || ''} onLoad={() => setLoading(false)} onError={() => { setLoading(false); setFailed(true); }} />}
       {failed && <div className="msg-media-failed">📷</div>}
       {loading && <span className="media-spinner" />}
     </div>
@@ -159,10 +166,12 @@ export function VideoThumb({ url, onOpen }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [dur, setDur] = useState(0);
+  const [source, setSource] = useState(url);
+  useEffect(() => { let alive = true; setReady(false); setFailed(false); getCachedMediaUrl(url, 'video').then(v => { if (alive) setSource(v || url); }).catch(() => {}); return () => { alive = false; }; }, [url]);
   return (
     <div className={`msg-media video-thumb ${ready ? '' : 'is-loading'}`} onClick={onOpen}>
       {!failed && (
-        <video className="message-video" src={videoFirstFrameSrc(url)} preload="auto" muted playsInline
+        <video className="message-video" src={videoFirstFrameSrc(source)} preload="auto" muted playsInline
           onLoadedData={() => setReady(true)} onLoadedMetadata={e => setDur(e.currentTarget.duration)} onError={() => setFailed(true)} />
       )}
       {!ready && !failed && <span className="media-spinner" />}

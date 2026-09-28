@@ -5,7 +5,7 @@ import {
   commentOnStatus, listenStatusComments, listenStatusViewCount,
   deleteOwnStatus, normalizeSegments, statusSeconds, IMAGE_STATUS_SECONDS
 } from '../lib/status';
-import { videoFirstFrameSrc } from '../lib/media';
+import { getCachedMediaUrl, videoFirstFrameSrc } from '../lib/media';
 import { Avatar } from './Profile';
 import { useBackHandler } from '../lib/backStack';
 import { usePrefs } from '../context/Prefs';
@@ -18,12 +18,14 @@ const FLIP_MS = 380;
 function StatusMedia({ item, active, paused, onProgress, onDone, onDuration }) {
   const [loading, setLoading] = useState(item.type !== 'text');
   const [fit, setFit] = useState('cover');
+  const [source, setSource] = useState(item.content);
   const videoRef = useRef(null);
   const segsRef = useRef([]);
   const doneRef = useRef(false);
   const pausedRef = useRef(paused);
   const activeRef = useRef(active);
   pausedRef.current = paused;
+  useEffect(() => { let alive = true; if (item.type === 'image' || item.type === 'video') getCachedMediaUrl(item.content, item.type).then(v => { if (alive) setSource(v || item.content); }).catch(() => {}); return () => { alive = false; }; }, [item.id, item.type, item.content]);
   activeRef.current = active;
   const cb = useRef({});
   cb.current = { onProgress, onDone, onDuration };
@@ -109,12 +111,12 @@ function StatusMedia({ item, active, paused, onProgress, onDone, onDuration }) {
   return (
     <>
       {item.type === 'image' && (
-        <img className={`status-fill fit-${fit}`} src={item.content} alt="" draggable={false}
+        <img className={`status-fill fit-${fit}`} src={source} alt="" draggable={false}
           onLoad={e => { setFit(e.currentTarget.naturalHeight > e.currentTarget.naturalWidth ? 'cover' : 'contain'); setLoading(false); }}
           onError={() => setLoading(false)} />
       )}
       {item.type === 'video' && (
-        <video ref={videoRef} className={`status-fill fit-${fit}`} src={videoFirstFrameSrc(item.content)}
+        <video ref={videoRef} className={`status-fill fit-${fit}`} src={videoFirstFrameSrc(source)}
           preload="auto" playsInline
           onLoadedData={() => setLoading(false)}
           onWaiting={() => setLoading(true)}
