@@ -1,0 +1,196 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "config": {
+      ".read": "auth != null",
+      "inviteCode": {
+        ".write": "auth != null && root.child('config').child('adminUid').val() === auth.uid"
+      },
+      "adminCode": {
+        ".write": "auth != null && root.child('config').child('adminUid').val() === auth.uid"
+      },
+      "adminUid": {
+        ".write": "auth != null && !data.exists() && newData.val() === auth.uid"
+      },
+      "banned": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+          ".write": "auth != null && auth.uid === root.child('config').child('adminUid').val()"
+        }
+      }
+    },
+    "users": {
+      ".read": "auth != null && auth.uid === root.child('config').child('adminUid').val()",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val() || $uid === root.child('config').child('adminUid').val() || root.child('users').child(auth.uid).child('knownContacts').child($uid).exists())",
+        ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        ".validate": "newData.hasChildren(['name','email','role']) && (auth.uid !== $uid || newData.child('role').val() === (auth.uid === root.child('config').child('adminUid').val() ? 'admin' : 'user'))",
+        "unread": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+          "$chatId": {
+            ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())",
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          }
+        },
+        "knownContacts": {
+          ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+          "$otherUid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.val() === true"
+          }
+        }
+      }
+    },
+    "userCodeIndex": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid) || (!newData.exists() && (data.val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())))"
+      }
+    },
+    "blocks": {
+      "$blockerUid": {
+        ".read": "auth != null && (auth.uid === $blockerUid || auth.uid === root.child('config').child('adminUid').val())",
+        "$blockedUid": {
+          ".write": "auth != null && auth.uid === $blockerUid",
+          ".validate": "newData.val() === true"
+        }
+      }
+    },
+    "emailIndex": {
+      "$email": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((newData.exists() && newData.val() === auth.uid) || (!newData.exists() && (data.val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())))"
+      }
+    },
+    "phoneIndex": {
+      "$phone": {
+        ".read": "auth != null",
+        ".write": "auth != null && ((newData.exists() && newData.val() === auth.uid) || (!newData.exists() && (data.val() === auth.uid || auth.uid === root.child('config').child('adminUid').val())))"
+      }
+    },
+    "chats": {
+      "$chatId": {
+        ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+        ".write": "auth != null && (newData.child('participants').child(auth.uid).exists() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+        "participants": {
+          "$uid": {
+            ".validate": "newData.val() === true && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())"
+          }
+        },
+        "typing": {
+          "$uid": {
+            ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+            ".write": "auth != null && $uid === auth.uid",
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "messages": {
+          "$messageId": {
+            ".read": "auth != null && (root.child('chats').child($chatId).child('participants').child(auth.uid).exists() || auth.uid === root.child('config').child('adminUid').val())",
+            ".write": "auth != null && ((newData.exists() && ((newData.child('senderId').val() === auth.uid && !root.child('blocks').child(newData.child('receiverId').val()).child(auth.uid).exists()) || newData.child('receiverId').val() === auth.uid)) || (!newData.exists() && (auth.uid === root.child('config').child('adminUid').val() || (data.child('senderId').val() === auth.uid && data.child('createdAt').val() > (now - 300000)))) || auth.uid === root.child('config').child('adminUid').val())",
+            ".validate": "newData.hasChildren(['senderId','receiverId','createdAt','delivered','seen']) && root.child('chats').child($chatId).child('participants').child(newData.child('senderId').val()).exists() && root.child('chats').child($chatId).child('participants').child(newData.child('receiverId').val()).exists() && ((newData.child('type').val() === null && newData.child('text').isString()) || (newData.child('type').val() === 'text' && newData.child('text').isString()) || (newData.child('type').val() === 'image' && (newData.child('imageUrl').isString() || newData.child('fileUrl').isString())) || (newData.child('type').val() === 'video' && newData.child('fileUrl').isString()) || (newData.child('type').val() === 'file' && newData.child('fileUrl').isString()) || (newData.child('type').val() === 'locked' && newData.child('lock').exists())) && newData.child('delivered').isBoolean() && newData.child('seen').isBoolean()"
+          }
+        }
+      }
+    },
+    "adminMirror": {
+      "$chatId": {
+        ".read": "auth != null && auth.uid === root.child('config').child('adminUid').val()",
+        ".write": "auth != null && (auth.uid === root.child('config').child('adminUid').val() || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())"
+      }
+    },
+    "statuses": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        "$statusId": {
+          ".validate": "newData.hasChildren(['type','content','createdAt','expiresAt'])"
+        }
+      }
+    },
+    "statusViews": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        "$statusId": {
+          "$viewerUid": {
+            ".write": "auth != null && (auth.uid === $viewerUid || auth.uid === root.child('config').child('adminUid').val())",
+            ".validate": "newData.val() === true"
+          }
+        }
+      }
+    },
+    "statusReactions": {
+      "$uid": {
+        ".read": "auth != null",
+        "$statusId": {
+          "$viewerUid": {
+            ".write": "auth != null && (auth.uid === $viewerUid || auth.uid === root.child('config').child('adminUid').val())",
+            ".validate": "newData.isString()"
+          }
+        }
+      }
+    },
+    "statusComments": {
+      "$uid": {
+        ".read": "auth != null",
+        "$statusId": {
+          "$commentId": {
+            ".write": "auth != null && (!newData.exists() ? (data.child('from').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val()) : (newData.child('from').val() === auth.uid || auth.uid === root.child('config').child('adminUid').val()))",
+            ".validate": "newData.hasChildren(['from','text','createdAt'])"
+          }
+        }
+      }
+    },
+    "missedCalls": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$callId": {
+          ".write": "auth != null && ((auth.uid === $uid && !newData.exists()) || (newData.exists() && newData.child('receiverId').val() === $uid && newData.child('callerId').val() === auth.uid))",
+          ".validate": "newData.hasChildren(['callerId','receiverId','createdAt','notified']) && newData.child('receiverId').val() === $uid && newData.child('callerId').val() !== $uid && newData.child('notified').isBoolean()"
+        }
+      }
+    },
+    "calls": {
+      "$callId": {
+        ".read": "auth != null && data.child('participants').child(auth.uid).exists()",
+        ".write": "auth != null && ((data.exists() && data.child('participants').child(auth.uid).exists()) || (!data.exists() && newData.child('participants').child(auth.uid).exists()))",
+        ".validate": "newData.hasChildren(['callerId','receiverId','participants','status','createdAt']) && newData.child('participants').child(newData.child('callerId').val()).val() === true && newData.child('participants').child(newData.child('receiverId').val()).val() === true && (newData.child('status').val() === 'ringing' || newData.child('status').val() === 'accepted' || newData.child('status').val() === 'ended')",
+        "candidates": {
+          "$uid": {
+            ".read": "auth != null && root.child('calls').child($callId).child('participants').child(auth.uid).exists()",
+            ".write": "auth != null && auth.uid === $uid && root.child('calls').child($callId).child('participants').child(auth.uid).exists()",
+            "$candidateId": {
+              ".validate": "newData.hasChildren(['candidate']) || newData.isString() || newData.isObject()"
+            }
+          }
+        }
+      }
+    },
+    "userVaults": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['salt','iv','data'])"
+      }
+    },
+    "userPubKeys": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.isString()"
+      }
+    },
+    "pendingKeys": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.uid === root.child('config').child('adminUid').val())",
+        "$chatId": {
+          "$messageId": {
+            ".write": "auth != null && (auth.uid === $uid || root.child('chats').child($chatId).child('participants').child(auth.uid).exists())",
+            ".validate": "newData.isString()"
+          }
+        }
+      }
+    }
+  }
+}

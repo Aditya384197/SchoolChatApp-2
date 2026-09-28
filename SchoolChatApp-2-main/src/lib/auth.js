@@ -1,0 +1,214 @@
+import {
+  createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, updateProfile
+} from 'firebase/auth';
+import { ref, get, set, update, remove, runTransaction } from 'firebase/database';
+import { auth, db } from '../firebase';
+import { ADMIN_ACCESS_EMAIL } from '../adminAccess';
+import { normalizePhone } from './contacts';
+
+// --- Registration is split into two phases so sign-up can resume cleanly if
+// interrupted, while staying wired to real Firebase Authentication and the
+// existing security rules underneath. No invite/admin code fields exist
+// anymore: anyone can sign up with email + password. Admin access is
+// granted silently, with nothing shown anywhere in the UI, only when the
+// email used to sign up matches ADMIN_ACCESS_EMAIL (see adminAccess.js). ---
+
+// Phase 1: create the Firebase Auth account. Phone is optional; when supplied
+// it is normalized and checked for uniqueness.
+export async function beginRegistration(email, password, phone = '') {
+  const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  try {
+    const normalized = normalizePhone(phone);
+    if (normalized && normalized.length !== 10) {
+      throw new Error('कृपया मोबाइल नंबर के 10 अंक सही डालें, या इसे खाली छोड़ दें।');
+    }
+    const existingPhone = normalized ? (await get(ref(db, `phoneIndex/${normalized}`))).val() : null;
+    if (existingPhone && existingPhone !== cred.user.uid) {
+      throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
+    }
+
+    let becameAdmin = false;
+    if (email.trim().toLowerCase() === ADMIN_ACCESS_EMAIL.toLowerCase()) {
+      // config/adminUid can only ever be written once — first claim by this
+      // exact email wins, permanently. No separate lock step needed.
+      const result = await runTransaction(ref(db, 'config/adminUid'), (current) => {
+        if (current !== null) return; // already claimed — abort
+        return cred.user.uid;
+      });
+      becameAdmin = result.committed && result.snapshot.val() === cred.user.uid;
+    }
+    return { uid: cred.user.uid, email: cred.user.email, willBeAdmin: becameAdmin };
+  } catch (e) {
+    // Do not leave an Auth-only account behind when the required phone check,
+    // duplicate-phone check, or admin initialization fails after account creation.
+    await cred.user.delete().catch(() => {});
+    throw e;
+  }
+}
+
+function randomUserCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I, easy to read aloud
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return 'SC-' + s;
+}
+
+// Claims a short, unique, shareable ID for this account (e.g. "SC-K3F9Q2")
+// so a friend can find you by typing it in, without the app exposing
+// everyone's profile to everyone by default. Retries on the rare collision.
+async function claimUserCode(uid) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = randomUserCode();
+    const result = await runTransaction(ref(db, `userCodeIndex/${code}`), current => {
+      if (current !== null) return; // taken — abort, caller retries with a new code
+      return uid;
+    });
+    if (result.committed && result.snapshot.val() === uid) return code;
+  }
+  throw new Error('यूज़र आईडी नहीं बन पाई, फिर कोशिश करें।');
+}
+
+function emailKey(email) {
+  return (email || '').trim().toLowerCase().replace(/[.#$/\[\]]/g, '_');
+}
+
+// Phase 2: write the actual profile (name/phone/avatar/photo) once collected.
+// Role is recomputed fresh from config/adminUid here rather than trusted
+// from phase 1, so this also correctly resumes an interrupted sign-up.
+export async function completeRegistration({ uid, email, name, phone, avatar, photoUrl, requirePhone = true }) {
+  const normalizedPhone = normalizePhone(phone);
+  if (normalizedPhone && normalizedPhone.length !== 10) {
+    throw new Error('कृपया मोबाइल नंबर के 10 अंक सही डालें, या इसे खाली छोड़ दें।');
+  }
+  if (normalizedPhone) {
+    const phoneSnap = await get(ref(db, `phoneIndex/${normalizedPhone}`));
+    const existingUid = phoneSnap.val();
+    if (existingUid && existingUid !== uid) {
+      throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
+    }
+  }
+
+  const adminUidSnap = await get(ref(db, 'config/adminUid'));
+  const role = adminUidSnap.val() === uid ? 'admin' : 'user';
+  const userCode = await claimUserCode(uid);
+  const now = Date.now();
+  const profile = {
+    name: name.trim(),
+    email,
+    phone: phone?.trim() || '',
+    avatar: avatar || '🧑‍🎓',
+    photoUrl: photoUrl || '',
+    role,
+    userCode,
+    createdAt: now,
+    lastSeen: now,
+    online: true
+  };
+
+  if (auth.currentUser) await updateProfile(auth.currentUser, { displayName: name.trim() });
+  const writes = {
+    [`users/${uid}`]: profile,
+    [`emailIndex/${emailKey(email)}`]: uid,
+  };
+  if (normalizedPhone) writes[`phoneIndex/${normalizedPhone}`] = uid;
+  await update(ref(db), writes);
+  localStorage.setItem('schoolChatVerified', '1');
+  return role;
+}
+
+// Checked right after every sign-in/registration: an admin-removed member's
+// uid stays permanently listed here, so even though their email/password
+// itself can't be deleted from this client-only app, they can never get
+// back past this check.
+export async function isBanned(uid) {
+  const snap = await get(ref(db, `config/banned/${uid}`));
+  return snap.val() === true;
+}
+
+export async function updateOwnProfile(uid, { name, phone, avatar, photoUrl }) {
+  const patch = {};
+  if (name !== undefined) patch.name = name.trim();
+  if (phone !== undefined) patch.phone = phone.trim();
+  if (avatar !== undefined) patch.avatar = avatar;
+  if (photoUrl !== undefined) patch.photoUrl = photoUrl;
+  if (name !== undefined && auth.currentUser) await updateProfile(auth.currentUser, { displayName: name.trim() });
+  if (phone !== undefined) {
+    const oldSnap = await get(ref(db, `users/${uid}/phone`));
+    const oldN = normalizePhone(oldSnap.val());
+    const newN = normalizePhone(phone);
+    if (newN) {
+      if (newN.length !== 10) throw new Error('कृपया सही 10 अंकों का मोबाइल नंबर दें।');
+      const existingUid = (await get(ref(db, `phoneIndex/${newN}`))).val();
+      if (existingUid && existingUid !== uid) throw new Error('यह मोबाइल नंबर पहले से किसी खाते में जुड़ा हुआ है।');
+    }
+    if (oldN && oldN !== newN) await remove(ref(db, `phoneIndex/${oldN}`)).catch(() => {});
+    if (newN) await set(ref(db, `phoneIndex/${newN}`), uid).catch(() => {});
+  }
+  await update(ref(db, `users/${uid}`), patch);
+}
+
+export async function login(email, password) {
+  const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+  if (await isBanned(cred.user.uid)) {
+    await signOut(auth);
+    throw new Error('आपकी एक्सेस हटा दी गई है।');
+  }
+  await set(ref(db, `users/${cred.user.uid}/lastSeen`), Date.now());
+  await set(ref(db, `users/${cred.user.uid}/online`), true);
+  localStorage.setItem('schoolChatVerified', '1');
+  return cred;
+}
+
+export async function logout() {
+  // Mark offline is best-effort only -- if this write hangs or fails (e.g.
+  // no connectivity right at that moment), signing out must still happen.
+  // Previously this was awaited unguarded, so a slow/failed write could
+  // silently block sign-out entirely (tapping "yes" appeared to do nothing).
+  if (auth.currentUser) {
+    set(ref(db, `users/${auth.currentUser.uid}/online`), false).catch(() => {});
+  }
+  localStorage.removeItem('schoolChatVerified');
+  // Bounded too, for the same reason -- signOut() is normally fast and
+  // local, but never let a stuck network call make "Yes" feel broken.
+  await Promise.race([
+    signOut(auth),
+    new Promise(resolve => setTimeout(resolve, 4000)),
+  ]);
+}
+
+// ---- Custom user ID -------------------------------------------------------
+// A user may pick their own ID, but it must mix letters AND digits so it can't
+// be a plain word/number that is easy to guess. Letters, digits and "_" only.
+export const USER_ID_MIN = 4;
+export const USER_ID_MAX = 20;
+
+export function validateUserId(raw) {
+  const id = String(raw || '').trim();
+  if (id.length < USER_ID_MIN || id.length > USER_ID_MAX) return 'length';
+  if (!/^[A-Za-z0-9_]+$/.test(id)) return 'chars';
+  if (!/[A-Za-z]/.test(id) || !/[0-9]/.test(id)) return 'mix';
+  return null; // valid
+}
+
+// Claims the new ID (unique across everyone), then points the profile at it
+// and releases the old one. Stored in capitals because look-ups are exact,
+// case-insensitive matches on the capitalised key.
+export async function changeUserCode(uid, oldCode, rawNewCode) {
+  const problem = validateUserId(rawNewCode);
+  if (problem) { const e = new Error('USER_ID_INVALID'); e.code = `user-id-${problem}`; throw e; }
+  const next = String(rawNewCode).trim().toUpperCase();
+  const prev = String(oldCode || '').trim().toUpperCase();
+  if (next === prev) return next;
+
+  const result = await runTransaction(ref(db, `userCodeIndex/${next}`), current => {
+    if (current !== null && current !== uid) return; // someone else already owns it -> abort
+    return uid;
+  });
+  if (!result.committed || result.snapshot.val() !== uid) {
+    const e = new Error('USER_ID_TAKEN'); e.code = 'user-id-taken'; throw e;
+  }
+  await update(ref(db, `users/${uid}`), { userCode: next });
+  if (prev) await remove(ref(db, `userCodeIndex/${prev}`)).catch(() => {}); // needs the updated rules; harmless if not yet deployed
+  return next;
+}

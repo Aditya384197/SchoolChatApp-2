@@ -1,0 +1,11 @@
+{
+  "name": "School Chat",
+  "short_name": "School Chat",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#eef5ff",
+  "theme_color": "#0f6fe8",
+  "icons": [
+    { "src": "/school-chat-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
